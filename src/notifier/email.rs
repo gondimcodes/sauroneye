@@ -54,9 +54,8 @@ impl SmtpNotifier {
             .to_string_lossy()
             .to_string();
 
-        let content_type =
-            ContentType::parse("application/pdf").unwrap_or_else(|_| ContentType::TEXT_PLAIN);
-        let attachment = Attachment::new(file_name).body(pdf_data, content_type);
+        let attachment = Attachment::new(file_name)
+            .body(pdf_data, ContentType::parse("application/pdf").unwrap());
 
         let email = Message::builder()
             .from(self.config.from_address.parse()?)
@@ -87,15 +86,27 @@ impl Notifier for SmtpNotifier {
             _ => return Ok(()),
         };
 
+        // Format clean subject and body without raw multi-byte emojis that trigger InvalidContentType on some SMTP servers
+        let clean_subject = format!(
+            "[SAURONEYE - {}] {}",
+            alert.severity.as_str(),
+            alert.title.replace(['\r', '\n'], " ")
+        );
+
+        let clean_body = format!(
+            "[{}]\nHost: {}\nTimestamp: {}\n\n{}\n{}",
+            alert.severity.as_str(),
+            alert.host,
+            alert.timestamp,
+            alert.title,
+            alert.details
+        );
+
         let email = Message::builder()
             .from(self.config.from_address.parse()?)
             .to(to_addr.parse()?)
-            .subject(format!(
-                "[SAURONEYE - {}] {}",
-                alert.severity.as_str(),
-                alert.title
-            ))
-            .singlepart(SinglePart::plain(alert.format_text()))?;
+            .subject(clean_subject)
+            .singlepart(SinglePart::plain(clean_body))?;
 
         let transport = self.build_transport()?;
         match transport.send(email).await {
