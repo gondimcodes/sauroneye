@@ -30,9 +30,7 @@ include_paths = [
     "/bin",
     "/sbin",
     "/boot",
-    "/root/.ssh",
-    # Monitor the daemon's own working directory to detect tampering attempts
-    "/var/lib/sauroneye"
+    "/root/.ssh"
 ]
 
 # Excluded patterns and global transient noise paths
@@ -40,11 +38,7 @@ exclude_paths = [
     "/etc/mtab",
     "/etc/resolv.conf",
     "*.swp",
-    "*.tmp",
-    # Exclude SQLite database files (high-frequency writes would generate constant noise)
-    "/var/lib/sauroneye/sauron.db",
-    "/var/lib/sauroneye/sauron.db-wal",
-    "/var/lib/sauroneye/sauron.db-shm"
+    "*.tmp"
 ]
 
 # Distro Profile: "auto", "debian", "redhat", "alpine", "arch" or "none"

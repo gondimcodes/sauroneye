@@ -435,17 +435,31 @@ async fn handle_run(
         std::collections::HashMap::new();
     let mut known_ownership: std::collections::HashMap<std::path::PathBuf, (u32, u32)> =
         std::collections::HashMap::new();
+    let mut known_directories: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     let mut recent_alert_debounce: std::collections::HashMap<String, std::time::Instant> =
         std::collections::HashMap::new();
 
     {
         use std::os::unix::fs::MetadataExt;
-        for root in &config.fim.include_paths {
+        let mut scan_roots = config.fim.include_paths.clone();
+        let internal_dir = std::path::PathBuf::from("/var/lib/sauroneye");
+        if internal_dir.exists() && !scan_roots.contains(&internal_dir) {
+            scan_roots.push(internal_dir);
+        }
+
+        for root in &scan_roots {
+            if root.is_dir() {
+                known_directories.insert(root.clone());
+            }
             for entry in walkdir::WalkDir::new(root)
                 .into_iter()
                 .filter_map(|e| e.ok())
             {
                 let path = entry.path().to_path_buf();
+                if entry.file_type().is_dir() {
+                    known_directories.insert(path.clone());
+                }
                 if let Ok(meta) = std::fs::metadata(&path) {
                     known_permissions.insert(path.clone(), meta.mode() & 0o777);
                     known_ownership.insert(path, (meta.uid(), meta.gid()));
@@ -609,6 +623,7 @@ async fn handle_run(
                             }
                             // Registra o novo dir nos state maps para que
                             // eventos subsequentes de chmod/chown sejam comparados corretamente
+                            known_directories.insert(path.clone());
                             known_permissions.insert(path.clone(), permissions & 0o777);
                             known_ownership.insert(path.clone(), (uid, gid));
                         }
@@ -645,6 +660,15 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::DirectoryRenamed { from, to } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("renamed_dir:{}:{}", from.display(), to.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
@@ -673,6 +697,56 @@ async fn handle_run(
                                     &ip_origin_str,
                                     &format!("Directory renamed from {} to {}", from.display(), to.display()),
                                 );
+                            }
+                        }
+                        crate::fim::engine::FimEvent::FileRenamed { from, to } => {
+                            if !analyzer.is_package_manager_active() {
+                                let key = format!("renamed_file:{}:{}", from.display(), to.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
+                                // Se o arquivo foi renomeado, também previne falsos Deleted/Created subsequentes
+                                recent_alert_debounce.insert(format!("deleted:{}", from.display()), now);
+                                recent_alert_debounce.insert(format!("created:{}", to.display()), now);
+
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "PROTECTED FILE RENAMED / MOVED",
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "A monitored file was renamed or moved:\n\nFrom: {}\nTo: {}\nActive User Origin IP(s): {}",
+                                        from.display(),
+                                        to.display(),
+                                        ip_origin_str
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "FILE_RENAMED",
+                                    &ip_origin_str,
+                                    &format!("File renamed from {} to {}", from.display(), to.display()),
+                                );
+                            }
+                            let _ = db.delete_fingerprint(&from);
+                            let hash_algo = crate::fim::hasher::HashAlgorithm::parse(&config.fim.hash_algorithm);
+                            if let Ok(fp) = crate::fim::state::FileFingerprint::generate(&to, hash_algo) {
+                                let _ = db.save_fingerprints_batch(&[fp]);
                             }
                         }
                         crate::fim::engine::FimEvent::PermissionsChanged { path, permissions, is_dir } => {
@@ -797,12 +871,18 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::Deleted { path } => {
+                            let is_directory = known_directories.remove(&path);
+                            known_permissions.remove(&path);
+                            known_ownership.remove(&path);
+
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("deleted:{}", path.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
-                                        let _ = db.delete_fingerprint(&path);
+                                        if !is_directory {
+                                            let _ = db.delete_fingerprint(&path);
+                                        }
                                         continue;
                                     }
                                 }
@@ -819,24 +899,45 @@ async fn handle_run(
                                     "local console / service".to_string()
                                 };
 
-                                let alert = AlertMessage::new(
-                                    &config.general.hostname,
-                                    "PROTECTED FILE DELETED / REMOVED",
-                                    AlertSeverity::Critical,
-                                    &format!(
-                                        "A monitored file was permanently removed from disk:\n\nFile: {}\nActive User Origin IP(s): {}",
-                                        path.display(),
-                                        ip_origin_str
-                                    ),
-                                );
-                                dispatcher.dispatch(alert).await;
-                                let _ = db.record_audit_log(
-                                    "FILE_DELETED",
-                                    &ip_origin_str,
-                                    &format!("File removed: {}", path.display()),
-                                );
+                                if is_directory {
+                                    let alert = AlertMessage::new(
+                                        &config.general.hostname,
+                                        "PROTECTED DIRECTORY DELETED / REMOVED",
+                                        AlertSeverity::Critical,
+                                        &format!(
+                                            "A monitored directory was permanently removed from disk:\n\nDirectory: {}\nActive User Origin IP(s): {}",
+                                            path.display(),
+                                            ip_origin_str
+                                        ),
+                                    );
+                                    dispatcher.dispatch(alert).await;
+                                    let _ = db.record_audit_log(
+                                        "DIR_DELETED",
+                                        &ip_origin_str,
+                                        &format!("Directory removed: {}", path.display()),
+                                    );
+                                } else {
+                                    let alert = AlertMessage::new(
+                                        &config.general.hostname,
+                                        "PROTECTED FILE DELETED / REMOVED",
+                                        AlertSeverity::Critical,
+                                        &format!(
+                                            "A monitored file was permanently removed from disk:\n\nFile: {}\nActive User Origin IP(s): {}",
+                                            path.display(),
+                                            ip_origin_str
+                                        ),
+                                    );
+                                    dispatcher.dispatch(alert).await;
+                                    let _ = db.record_audit_log(
+                                        "FILE_DELETED",
+                                        &ip_origin_str,
+                                        &format!("File removed: {}", path.display()),
+                                    );
+                                }
                             }
-                            let _ = db.delete_fingerprint(&path);
+                            if !is_directory {
+                                let _ = db.delete_fingerprint(&path);
+                            }
                         }
                     }
                 }

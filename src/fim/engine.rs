@@ -36,6 +36,10 @@ pub enum FimEvent {
         from: PathBuf,
         to: PathBuf,
     },
+    FileRenamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
     PermissionsChanged {
         path: PathBuf,
         permissions: u32,
@@ -164,6 +168,7 @@ impl FimEngine {
             Config::default().with_poll_interval(Duration::from_millis(500)),
         )?;
 
+        // 1. Registra os caminhos do config.toml
         for include_path in &self.config.include_paths {
             if include_path.exists() {
                 info!(
@@ -174,6 +179,28 @@ impl FimEngine {
                     error!("Failed to watch {}: {}", include_path.display(), e);
                 }
             }
+        }
+
+        // 2. Proteção Nativa e Inviolável da base de dados e diretório interno (/var/lib/sauroneye)
+        // Independentemente do que estiver ou não configurado no config.toml
+        let internal_data_dir = Path::new("/var/lib/sauroneye");
+        if internal_data_dir.exists() {
+            if !self
+                .config
+                .include_paths
+                .contains(&internal_data_dir.to_path_buf())
+            {
+                info!(
+                    "Registering native immutable FIM watch on daemon directory: {}",
+                    internal_data_dir.display()
+                );
+                let _ = watcher.watch(internal_data_dir, RecursiveMode::Recursive);
+            }
+        }
+        // Monitora também o diretório pai /var/lib para capturar se a própria pasta /var/lib/sauroneye for movida ou deletada
+        let var_lib = Path::new("/var/lib");
+        if var_lib.exists() && !self.config.include_paths.contains(&var_lib.to_path_buf()) {
+            let _ = watcher.watch(var_lib, RecursiveMode::NonRecursive);
         }
 
         let active_exclusions = self.active_exclusions.clone();
@@ -339,14 +366,10 @@ impl FimEngine {
                                 to: to.clone(),
                             });
                         } else if to.is_file() {
-                            if let Ok(fp) = FileFingerprint::generate(to, hash_algo) {
-                                let _ = event_tx
-                                    .blocking_send(FimEvent::Deleted { path: from.clone() });
-                                let _ = event_tx.blocking_send(FimEvent::Created {
-                                    path: to.clone(),
-                                    fingerprint: fp,
-                                });
-                            }
+                            let _ = event_tx.blocking_send(FimEvent::FileRenamed {
+                                from: from.clone(),
+                                to: to.clone(),
+                            });
                         }
                     }
                 } else {
