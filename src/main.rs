@@ -599,6 +599,38 @@ async fn handle_run(
                                 );
                             }
                         }
+                        crate::fim::engine::FimEvent::DirectoryRenamed { from, to } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "PROTECTED DIRECTORY RENAMED / MOVED",
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "A monitored directory was renamed or moved:\n\nFrom: {}\nTo: {}\nActive User Origin IP(s): {}",
+                                        from.display(),
+                                        to.display(),
+                                        ip_origin_str
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "DIR_RENAMED",
+                                    &ip_origin_str,
+                                    &format!("Directory renamed from {} to {}", from.display(), to.display()),
+                                );
+                            }
+                        }
                         crate::fim::engine::FimEvent::MetadataChanged { path, permissions, uid, gid, is_dir } => {
                             if !analyzer.is_package_manager_active() {
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();

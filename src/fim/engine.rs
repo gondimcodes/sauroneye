@@ -32,6 +32,10 @@ pub enum FimEvent {
     DirectoryDeleted {
         path: PathBuf,
     },
+    DirectoryRenamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
     MetadataChanged {
         path: PathBuf,
         permissions: u32,
@@ -231,6 +235,32 @@ impl FimEngine {
                                 gid: meta.gid(),
                             };
                             let _ = event_tx.blocking_send(fim_ev);
+                        }
+                    }
+                }
+            }
+            EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
+                if event.paths.len() >= 2 {
+                    let from = &event.paths[0];
+                    let to = &event.paths[1];
+                    if !Self::check_excluded(from, active_exclusions)
+                        || !Self::check_excluded(to, active_exclusions)
+                    {
+                        if to.is_dir() {
+                            let fim_ev = FimEvent::DirectoryRenamed {
+                                from: from.clone(),
+                                to: to.clone(),
+                            };
+                            let _ = event_tx.blocking_send(fim_ev);
+                        } else if to.is_file() {
+                            if let Ok(fp) = FileFingerprint::generate(to, hash_algo) {
+                                let _ = event_tx
+                                    .blocking_send(FimEvent::Deleted { path: from.clone() });
+                                let _ = event_tx.blocking_send(FimEvent::Created {
+                                    path: to.clone(),
+                                    fingerprint: fp,
+                                });
+                            }
                         }
                     }
                 }
