@@ -77,7 +77,6 @@ impl PackageManagerChecker {
             "pacman",
             "apk",
             "zypper",
-            "sauroneye",
         ];
 
         for &mgr in &known_managers {
