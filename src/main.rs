@@ -235,15 +235,90 @@ async fn handle_run(
         config.general.hostname
     );
 
-    let _fim_engine = FimEngine::new(config.fim.clone());
-    let _analyzer = Analyzer::new(config.package_manager.check_package_db);
+    let fim_engine = FimEngine::new(config.fim.clone());
+    let analyzer = Analyzer::new(config.package_manager.check_package_db);
     let rce_detector = RceDetector::new(config.rce_detector.clone());
     let mut pam_watcher = PamWatcher::new();
+
+    // Dispara alerta informativo de inicialização / reinicialização do daemon
+    let startup_alert = AlertMessage::new(
+        &config.general.hostname,
+        "SauronEye Daemon Started / Resumed",
+        AlertSeverity::Info,
+        &format!(
+            "Sentinel daemon is now active and monitoring in real time.\nMonitored Paths: {:?}\nRCE Protection: {}\nAuth Auditing: {}",
+            config.fim.include_paths,
+            if config.rce_detector.enabled { "Active" } else { "Disabled" },
+            if config.auth_monitor.enabled { "Active" } else { "Disabled" }
+        ),
+    );
+    dispatcher.dispatch(startup_alert).await;
+
+    // Inicia o watcher em tempo real de eventos do sistema de arquivos
+    let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
+    let _watcher = fim_engine.start_watcher(fim_tx)?;
 
     let poll_interval = Duration::from_millis(config.general.poll_interval_ms);
 
     loop {
-        // 1. RCE & Process Anomaly Scan
+        // 1. Process Real-Time FIM Events
+        while let Ok(fim_event) = fim_rx.try_recv() {
+            match fim_event {
+                crate::fim::engine::FimEvent::Modified {
+                    path,
+                    new_fingerprint,
+                } => {
+                    let old_fp = db.get_fingerprint(&path).ok().flatten();
+                    let is_different = if let Some(ref old) = old_fp {
+                        old.hash_value != new_fingerprint.hash_value
+                    } else {
+                        true
+                    };
+
+                    if is_different {
+                        let analysis = analyzer.analyze_modification(
+                            &path,
+                            None,
+                            old_fp.as_ref(),
+                            &new_fingerprint,
+                        );
+                        let alert = AlertMessage::new(
+                            &config.general.hostname,
+                            &analysis.title,
+                            analysis.severity,
+                            &analysis.details,
+                        );
+                        dispatcher.dispatch(alert).await;
+                        let _ = db.save_fingerprints_batch(&[new_fingerprint]);
+                    }
+                }
+                crate::fim::engine::FimEvent::Created { path, fingerprint } => {
+                    let alert = AlertMessage::new(
+                        &config.general.hostname,
+                        "NEW FILE CREATED IN PROTECTED PATH",
+                        AlertSeverity::Warning,
+                        &format!(
+                            "New file detected: {}\nHash: {}",
+                            path.display(),
+                            fingerprint.hash_value
+                        ),
+                    );
+                    dispatcher.dispatch(alert).await;
+                    let _ = db.save_fingerprints_batch(&[fingerprint]);
+                }
+                crate::fim::engine::FimEvent::Deleted { path } => {
+                    let alert = AlertMessage::new(
+                        &config.general.hostname,
+                        "PROTECTED FILE DELETED",
+                        AlertSeverity::Critical,
+                        &format!("File was removed: {}", path.display()),
+                    );
+                    dispatcher.dispatch(alert).await;
+                }
+            }
+        }
+
+        // 2. RCE & Process Anomaly Scan
         if config.rce_detector.enabled {
             let rce_alerts = rce_detector.scan_anomalies();
             for rce in rce_alerts {
@@ -260,7 +335,7 @@ async fn handle_run(
             }
         }
 
-        // 2. Auth & Login Monitor
+        // 3. Auth & Login Monitor
         if config.auth_monitor.enabled {
             if let Ok(auth_events) = pam_watcher.poll_new_events() {
                 for ev in auth_events {
