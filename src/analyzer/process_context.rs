@@ -56,45 +56,35 @@ impl ProcessInspector {
         None
     }
 
-    /// Discovers active logged in sessions and remote client IPs from /proc/net/tcp and SSH sessions
+    /// Discovers active logged in sessions and remote client IPs from /proc and socket tables
     pub fn get_active_logged_in_ips() -> Vec<ActiveUserSession> {
         let mut sessions = Vec::new();
 
-        // 1. Scan sshd processes in /proc to correlate socket connections
+        // 1. Check all shell processes (bash, zsh, sh) and sshd in /proc
         if let Ok(entries) = fs::read_dir("/proc") {
             for entry in entries.filter_map(|e| e.ok()) {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if let Ok(pid) = name.parse::<u32>() {
-                    let comm_path = entry.path().join("comm");
-                    if let Ok(comm) = fs::read_to_string(comm_path) {
-                        let proc_name = comm.trim();
-                        if proc_name == "sshd" || proc_name == "sshd-session" {
-                            // Read environment /proc/<pid>/environ for SSH_CLIENT or SSH_CONNECTION
-                            if let Ok(env_bytes) = fs::read(entry.path().join("environ")) {
-                                for env_var in env_bytes.split(|&b| b == 0) {
-                                    let s = String::from_utf8_lossy(env_var);
-                                    if s.starts_with("SSH_CLIENT=")
-                                        || s.starts_with("SSH_CONNECTION=")
+                    // Check environ of all processes for SSH_CLIENT / SSH_CONNECTION
+                    let env_path = entry.path().join("environ");
+                    if let Ok(env_bytes) = fs::read(env_path) {
+                        for env_var in env_bytes.split(|&b| b == 0) {
+                            let s = String::from_utf8_lossy(env_var);
+                            if s.starts_with("SSH_CLIENT=") || s.starts_with("SSH_CONNECTION=") {
+                                let val = s.split('=').nth(1).unwrap_or("");
+                                let parts: Vec<&str> = val.split_whitespace().collect();
+                                if !parts.is_empty() {
+                                    let ip = parts[0].to_string();
+                                    if !ip.is_empty()
+                                        && !sessions
+                                            .iter()
+                                            .any(|s: &ActiveUserSession| s.ip_origin == ip)
                                     {
-                                        let parts: Vec<&str> = s
-                                            .split('=')
-                                            .nth(1)
-                                            .unwrap_or("")
-                                            .split_whitespace()
-                                            .collect();
-                                        if !parts.is_empty() {
-                                            let ip = parts[0].to_string();
-                                            if !sessions
-                                                .iter()
-                                                .any(|s: &ActiveUserSession| s.ip_origin == ip)
-                                            {
-                                                sessions.push(ActiveUserSession {
-                                                    user: "ssh-user".to_string(),
-                                                    tty: format!("pid-{}", pid),
-                                                    ip_origin: ip,
-                                                });
-                                            }
-                                        }
+                                        sessions.push(ActiveUserSession {
+                                            user: "ssh-session".to_string(),
+                                            tty: format!("pid-{}", pid),
+                                            ip_origin: ip,
+                                        });
                                     }
                                 }
                             }
@@ -104,7 +94,7 @@ impl ProcessInspector {
             }
         }
 
-        // 2. If no SSH_CLIENT environment was found directly, parse /proc/net/tcp for active inbound SSH ports (22)
+        // 2. Parse IPv4 connections from /proc/net/tcp
         if sessions.is_empty() {
             if let Ok(tcp_content) = fs::read_to_string("/proc/net/tcp") {
                 for line in tcp_content.lines().skip(1) {
@@ -116,16 +106,43 @@ impl ProcessInspector {
 
                         // State 01 = ESTABLISHED
                         if state == "01" {
-                            if let Some(remote_ip) =
-                                Self::parse_hex_ipv4_and_port(remote_addr, local_addr)
-                            {
+                            if let Some(remote_ip) = Self::parse_hex_ipv4(remote_addr, local_addr) {
                                 if !sessions
                                     .iter()
                                     .any(|s: &ActiveUserSession| s.ip_origin == remote_ip)
                                 {
                                     sessions.push(ActiveUserSession {
-                                        user: "remote-session".to_string(),
+                                        user: "remote-client".to_string(),
                                         tty: "tcp".to_string(),
+                                        ip_origin: remote_ip,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Parse IPv6 connections from /proc/net/tcp6 (e.g. ::1 or remote IPv6)
+        if sessions.is_empty() {
+            if let Ok(tcp6_content) = fs::read_to_string("/proc/net/tcp6") {
+                for line in tcp6_content.lines().skip(1) {
+                    let cols: Vec<&str> = line.split_whitespace().collect();
+                    if cols.len() >= 4 {
+                        let local_addr = cols[1];
+                        let remote_addr = cols[2];
+                        let state = cols[3];
+
+                        if state == "01" {
+                            if let Some(remote_ip) = Self::parse_hex_ipv6(remote_addr, local_addr) {
+                                if !sessions
+                                    .iter()
+                                    .any(|s: &ActiveUserSession| s.ip_origin == remote_ip)
+                                {
+                                    sessions.push(ActiveUserSession {
+                                        user: "remote-client".to_string(),
+                                        tty: "tcp6".to_string(),
                                         ip_origin: remote_ip,
                                     });
                                 }
@@ -139,7 +156,7 @@ impl ProcessInspector {
         sessions
     }
 
-    fn parse_hex_ipv4_and_port(remote: &str, local: &str) -> Option<String> {
+    fn parse_hex_ipv4(remote: &str, local: &str) -> Option<String> {
         let local_parts: Vec<&str> = local.split(':').collect();
         let remote_parts: Vec<&str> = remote.split(':').collect();
 
@@ -148,9 +165,29 @@ impl ProcessInspector {
             // Check if local port is standard SSH (22) or commonly used SSH ports
             if local_port == 22 || local_port == 2222 {
                 let ip_hex = u32::from_str_radix(remote_parts[0], 16).ok()?;
-                let ip = Ipv4Addr::from(ip_hex.to_be());
+                // /proc/net/tcp stores IPv4 addresses in little-endian byte order on x86/ARM
+                let ip = Ipv4Addr::from(u32::from_be(ip_hex.to_le()));
                 let port = u16::from_str_radix(remote_parts[1], 16).ok().unwrap_or(0);
                 return Some(format!("{}:{}", ip, port));
+            }
+        }
+        None
+    }
+
+    fn parse_hex_ipv6(remote: &str, local: &str) -> Option<String> {
+        let local_parts: Vec<&str> = local.split(':').collect();
+        let remote_parts: Vec<&str> = remote.split(':').collect();
+
+        if local_parts.len() == 2 && remote_parts.len() == 2 {
+            let local_port = u16::from_str_radix(local_parts[1], 16).ok()?;
+            if local_port == 22 || local_port == 2222 {
+                let remote_hex = remote_parts[0];
+                if remote_hex.len() == 32 {
+                    if remote_hex == "00000000000000000000000001000000" {
+                        return Some("::1 (localhost)".to_string());
+                    }
+                    return Some("IPv6 remote client".to_string());
+                }
             }
         }
         None
