@@ -537,49 +537,73 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::Created { path, fingerprint } => {
-                            if !analyzer.is_package_manager_active() {
-                                let key = format!("created:{}", path.display());
-                                let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
-                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
-                                        let _ = db.save_fingerprints_batch(&[fingerprint]);
-                                        continue;
+                            let old_fp = db.get_fingerprint(&path).ok().flatten();
+                            if let Some(ref old) = old_fp {
+                                // O arquivo já existia no banco de dados, mas foi recriado (padrão de salvamento atômico do Vim/editores)
+                                if old.hash_value != fingerprint.hash_value {
+                                    let analysis = analyzer.analyze_modification(&path, None, Some(old), &fingerprint);
+                                    if !analysis.is_legitimate_update || config.package_manager.notify_legitimate_updates {
+                                        let alert = AlertMessage::new(
+                                            &config.general.hostname,
+                                            &analysis.title,
+                                            analysis.severity,
+                                            &analysis.details,
+                                        );
+                                        dispatcher.dispatch(alert).await;
                                     }
+                                    let _ = db.record_audit_log(
+                                        if analysis.is_legitimate_update { "PACKAGE_UPDATE" } else { "FILE_TAMPERING" },
+                                        "process",
+                                        &format!("File: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                                    );
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                let _ = db.save_fingerprints_batch(&[fingerprint]);
+                            } else {
+                                if !analyzer.is_package_manager_active() {
+                                    let key = format!("created:{}", path.display());
+                                    let now = std::time::Instant::now();
+                                    if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                        if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                            let _ = db.save_fingerprints_batch(&[fingerprint]);
+                                            continue;
+                                        }
+                                    }
+                                    recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
+                                    let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                    let ip_origin_str = if !active_sessions.is_empty() {
+                                        active_sessions
+                                            .iter()
+                                            .map(|s| s.ip_origin.clone())
+                                            .collect::<Vec<String>>()
+                                            .join(", ")
+                                    } else {
+                                        "local console / service".to_string()
+                                    };
 
-                                let alert = AlertMessage::new(
-                                    &config.general.hostname,
-                                    "NEW FILE CREATED IN PROTECTED DIRECTORY",
-                                    AlertSeverity::Warning,
-                                    &format!(
-                                        "A new unindexed file was created in a monitored path:\n\nFile: {}\nActive User Origin IP(s): {}\nSize: {} bytes\nHash ({}): {}",
-                                        path.display(),
-                                        ip_origin_str,
-                                        fingerprint.size,
-                                        fingerprint.hash_algorithm,
-                                        fingerprint.hash_value
-                                    ),
-                                );
-                                dispatcher.dispatch(alert).await;
-                                let _ = db.record_audit_log(
-                                    "FILE_CREATED",
-                                    &ip_origin_str,
-                                    &format!("File: {}\nHash: {}", path.display(), fingerprint.hash_value),
-                                );
+                                    let alert = AlertMessage::new(
+                                        &config.general.hostname,
+                                        "NEW FILE CREATED IN PROTECTED DIRECTORY",
+                                        AlertSeverity::Warning,
+                                        &format!(
+                                            "A new unindexed file was created in a monitored path:\n\nFile: {}\nActive User Origin IP(s): {}\nSize: {} bytes\nHash ({}): {}",
+                                            path.display(),
+                                            ip_origin_str,
+                                            fingerprint.size,
+                                            fingerprint.hash_algorithm,
+                                            fingerprint.hash_value
+                                        ),
+                                    );
+                                    dispatcher.dispatch(alert).await;
+                                    let _ = db.record_audit_log(
+                                        "FILE_CREATED",
+                                        &ip_origin_str,
+                                        &format!("File: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                                    );
+                                }
+                                let _ = db.save_fingerprints_batch(&[fingerprint]);
                             }
-                            let _ = db.save_fingerprints_batch(&[fingerprint]);
+
                             // Registra o novo arquivo nos state maps para que
                             // eventos subsequentes de chmod/chown sejam comparados corretamente
                             use std::os::unix::fs::MetadataExt;

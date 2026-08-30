@@ -37,8 +37,14 @@ include_paths = [
 exclude_paths = [
     "/etc/mtab",
     "/etc/resolv.conf",
+    # Text editor temporary/swap noise (Vim, Nano, Emacs, GIO)
     "*.swp",
-    "*.tmp"
+    "*.swx",
+    "*.swo",
+    "*~",
+    "4913",              # Vim atomic inode check file (Vim source file.c: #define BVAL 4913)
+    "*.tmp",
+    ".goutputstream-*"
 ]
 
 # Distro Profile: "auto", "debian", "redhat", "alpine", "arch" or "none"
