@@ -431,20 +431,35 @@ async fn handle_run(
     dispatcher.dispatch(startup_alert).await;
     let _ = db.record_audit_log("DAEMON_START", "system", "SauronEye Sentinel started");
 
-    // Inicia o watcher em tempo real de eventos do sistema de arquivos
-    let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
-    let _watcher = fim_engine.start_watcher(fim_tx)?;
-
-    // State maps: rastreiam última permissão/dono CONHECIDA por caminho
-    // None = primeira vez que vemos este caminho -> sempre alerta
-    // Some(old) == new -> duplicata de kernel -> descarta
-    // Some(old) != new -> mudança real -> alerta
+    // Pré-carrega o baseline de permissões e ownership de todos os caminhos monitorados
+    // ANTES de iniciar o watcher para evitar race condition.
+    // Arquivos/dirs que aparecerem DEPOIS do watcher iniciar são genuinamente novos.
     let mut known_permissions: std::collections::HashMap<std::path::PathBuf, u32> =
         std::collections::HashMap::new();
     let mut known_ownership: std::collections::HashMap<std::path::PathBuf, (u32, u32)> =
         std::collections::HashMap::new();
     let mut recent_alert_debounce: std::collections::HashMap<String, std::time::Instant> =
         std::collections::HashMap::new();
+
+    {
+        use std::os::unix::fs::MetadataExt;
+        for root in &config.fim.include_paths {
+            for entry in walkdir::WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path().to_path_buf();
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                    known_ownership.insert(path, (meta.uid(), meta.gid()));
+                }
+            }
+        }
+    }
+
+    // Inicia o watcher em tempo real APÓS baseline capturado
+    let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
+    let _watcher = fim_engine.start_watcher(fim_tx)?;
 
     // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -544,6 +559,13 @@ async fn handle_run(
                                 );
                             }
                             let _ = db.save_fingerprints_batch(&[fingerprint]);
+                            // Registra o novo arquivo nos state maps para que
+                            // eventos subsequentes de chmod/chown sejam comparados corretamente
+                            use std::os::unix::fs::MetadataExt;
+                            if let Ok(meta) = std::fs::metadata(&path) {
+                                known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                                known_ownership.insert(path.clone(), (meta.uid(), meta.gid()));
+                            }
                         }
                         crate::fim::engine::FimEvent::DirectoryCreated { path, permissions, uid, gid } => {
                             if !analyzer.is_package_manager_active() {
@@ -578,6 +600,10 @@ async fn handle_run(
                                     &format!("Directory: {} (mode: {:o}, uid: {}, gid: {})", path.display(), permissions & 0o777, uid, gid),
                                 );
                             }
+                            // Registra o novo dir nos state maps para que
+                            // eventos subsequentes de chmod/chown sejam comparados corretamente
+                            known_permissions.insert(path.clone(), permissions & 0o777);
+                            known_ownership.insert(path.clone(), (uid, gid));
                         }
                         crate::fim::engine::FimEvent::DirectoryDeleted { path } => {
                             if !analyzer.is_package_manager_active() {
@@ -646,10 +672,12 @@ async fn handle_run(
                             if !analyzer.is_package_manager_active() {
                                 let norm_perm = permissions & 0o777;
 
-                                // None = primeira vez que vemos este caminho -> alerta
-                                // Some(old) == norm_perm -> duplicata de kernel -> descarta
+                                // Baseline foi pré-carregado antes do watcher:
+                                // None = arquivo novo criado após daemon iniciar (alerta já vem via Created)
+                                // Some(old) == norm_perm = duplicata de kernel = descarta
+                                // Some(old) != norm_perm = mudança REAL de permissão = alerta
                                 let perm_changed = match known_permissions.get(&path) {
-                                    None => true,
+                                    None => false,  // Novo path: alerta já vem via FimEvent::Created
                                     Some(&old) => old != norm_perm,
                                 };
                                 if !perm_changed {
@@ -701,10 +729,11 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, user_name, group_name, is_dir } => {
                             if !analyzer.is_package_manager_active() {
-                                // None = primeira vez que vemos este caminho -> alerta
-                                // Some((old_uid, old_gid)) == (uid, gid) -> duplicata -> descarta
+                                // None = arquivo novo = alerta já vem via FimEvent::Created
+                                // Some((old_uid, old_gid)) == (uid, gid) = duplicata = descarta
+                                // Some((old_uid, old_gid)) != (uid, gid) = mudança REAL = alerta
                                 let owner_changed = match known_ownership.get(&path) {
-                                    None => true,
+                                    None => false,  // Novo path: alerta já vem via FimEvent::Created
                                     Some(&(old_uid, old_gid)) => old_uid != uid || old_gid != gid,
                                 };
                                 if !owner_changed {
