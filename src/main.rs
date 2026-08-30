@@ -17,6 +17,7 @@ use tracing::{error, info, warn};
 use crate::analyzer::Analyzer;
 use crate::auth::pam_watcher::PamWatcher;
 use crate::cli::auth_prompt::AuthPrompt;
+use crate::cli::banner::print_banner;
 use crate::config::Config;
 use crate::db::user::AdminAuth;
 use crate::db::Database;
@@ -51,6 +52,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    print_banner(env!("CARGO_PKG_VERSION"));
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
