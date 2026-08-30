@@ -273,8 +273,8 @@ async fn handle_run(
                     AlertSeverity::Critical,
                     "The sentinel daemon received a SIGTERM signal and is shutting down! Service was stopped or system is restarting.",
                 );
-                dispatcher.dispatch(alert).await;
-                break;
+                let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
+                std::process::exit(0);
             }
             _ = sigint.recv() => {
                 warn!("SIGINT (Ctrl+C) received. Shutting down SauronEye sentinel...");
@@ -284,8 +284,8 @@ async fn handle_run(
                     AlertSeverity::Critical,
                     "The sentinel daemon was manually interrupted (SIGINT / Ctrl+C) and is shutting down!",
                 );
-                dispatcher.dispatch(alert).await;
-                break;
+                let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
+                std::process::exit(0);
             }
             _ = sleep(poll_interval) => {
                 // 1. Process Real-Time FIM Events
@@ -375,6 +375,4 @@ async fn handle_run(
             }
         }
     }
-
-    Ok(())
 }
