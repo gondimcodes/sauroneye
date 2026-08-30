@@ -12,15 +12,13 @@ steps:
   build:
     image: rust:latest
     commands:
-      - apt-get update && apt-get install -y musl-tools
-      - rustup target add x86_64-unknown-linux-musl
-      - cargo build --release --target x86_64-unknown-linux-musl -j 1
-      - strip target/x86_64-unknown-linux-musl/release/sauroneye
+      - cargo build --release -j 1
+      - strip target/release/sauroneye
       - mkdir -p dist
-      - cp target/x86_64-unknown-linux-musl/release/sauroneye dist/sauroneye
+      - cp target/release/sauroneye dist/sauroneye
       - cp config.toml.example README.md README.pt-BR.md INSTALL.md INSTALL.pt-BR.md TECH_STACK.md LICENSE dist/
       - cd dist
-      - tar -czf sauroneye-$${CI_COMMIT_TAG}-x86_64-unknown-linux-musl.tar.gz sauroneye config.toml.example README.md README.pt-BR.md INSTALL.md INSTALL.pt-BR.md TECH_STACK.md LICENSE
+      - tar -czf sauroneye-$${CI_COMMIT_TAG}-linux-x86_64.tar.gz sauroneye config.toml.example README.md README.pt-BR.md INSTALL.md INSTALL.pt-BR.md TECH_STACK.md LICENSE
     when:
       event: tag
 
