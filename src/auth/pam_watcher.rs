@@ -69,6 +69,13 @@ impl PamWatcher {
 
     fn parse_auth_line(line: &str) -> Option<AuthEvent> {
         let lower = line.to_lowercase();
+
+        // Avoid duplicate SSH alerts: sshd already logs "Accepted publickey/password" with real origin IP,
+        // so ignore the redundant "pam_unix(sshd:session): session opened" event
+        if lower.contains("sshd") && lower.contains("session opened for user") {
+            return None;
+        }
+
         if lower.contains("accepted password")
             || lower.contains("accepted publickey")
             || lower.contains("session opened for user")
