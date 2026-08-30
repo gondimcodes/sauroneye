@@ -48,6 +48,8 @@ enabled = true
 monitor_successful_logins = true
 monitor_failed_attempts = true
 track_sudo_elevation = true
+# Ignore periodic background cron pam_unix session opened/closed events
+ignore_cron_sessions = true
 
 [rce_detector]
 enabled = true

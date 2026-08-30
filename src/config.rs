@@ -73,6 +73,8 @@ pub struct AuthMonitorConfig {
     pub monitor_failed_attempts: bool,
     #[serde(default = "default_true")]
     pub track_sudo_elevation: bool,
+    #[serde(default = "default_true")]
+    pub ignore_cron_sessions: bool,
 }
 
 impl Default for AuthMonitorConfig {
@@ -82,6 +84,7 @@ impl Default for AuthMonitorConfig {
             monitor_successful_logins: true,
             monitor_failed_attempts: true,
             track_sudo_elevation: true,
+            ignore_cron_sessions: true,
         }
     }
 }

@@ -101,13 +101,21 @@ impl PamWatcher {
                 None
             };
 
+            let service = if lower.contains("sshd") {
+                "sshd".to_string()
+            } else if lower.contains("cron") {
+                "cron".to_string()
+            } else if lower.contains("sudo") {
+                "sudo".to_string()
+            } else if lower.contains("su:") {
+                "su".to_string()
+            } else {
+                "pam".to_string()
+            };
+
             return Some(AuthEvent {
                 user,
-                service: if lower.contains("sshd") {
-                    "sshd".to_string()
-                } else {
-                    "pam".to_string()
-                },
+                service,
                 rhost,
                 tty: None,
                 success: is_success,

@@ -354,11 +354,29 @@ async fn handle_run(
                 if config.auth_monitor.enabled {
                     if let Ok(auth_events) = pam_watcher.poll_new_events() {
                         for ev in auth_events {
+                            if config.auth_monitor.ignore_cron_sessions && ev.service == "cron" {
+                                continue;
+                            }
+
                             if ev.success && config.auth_monitor.monitor_successful_logins {
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
                                     "Successful User Login",
                                     AlertSeverity::Info,
+                                    &format!(
+                                        "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
+                                        ev.user,
+                                        ev.service,
+                                        ev.rhost.unwrap_or_else(|| "local".to_string()),
+                                        ev.raw_message
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                            } else if !ev.success && config.auth_monitor.monitor_failed_attempts {
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "Authentication Failure Attempt",
+                                    AlertSeverity::Warning,
                                     &format!(
                                         "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
                                         ev.user,
