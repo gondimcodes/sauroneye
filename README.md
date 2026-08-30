@@ -117,7 +117,7 @@ enable_wal = true
 [fim]
 backend = "auto"
 hash_algorithm = "blake3"
-include_paths = ["/etc", "/usr/bin", "/usr/sbin", "/bin", "/sbin", "/boot", "/root/.ssh"]
+include_paths = ["/etc", "/usr/bin", "/usr/sbin", "/usr/lib", "/bin", "/sbin", "/boot", "/root/.ssh"]
 exclude_paths = ["/etc/mtab", "/etc/resolv.conf", "*.swp", "*.tmp"]
 
 [package_manager]

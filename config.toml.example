@@ -26,6 +26,7 @@ include_paths = [
     "/etc",
     "/usr/bin",
     "/usr/sbin",
+    "/usr/lib",
     "/bin",
     "/sbin",
     "/boot",
