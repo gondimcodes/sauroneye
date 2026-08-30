@@ -49,13 +49,6 @@ pub enum FimEvent {
         group_name: Option<String>,
         is_dir: bool,
     },
-    MetadataChanged {
-        path: PathBuf,
-        permissions: u32,
-        uid: u32,
-        gid: u32,
-        is_dir: bool,
-    },
 }
 
 pub struct FimEngine {
@@ -285,29 +278,8 @@ impl FimEngine {
                             }
                         }
                     }
-                    MetadataKind::AccessTime | MetadataKind::WriteTime => {
-                        // Ignora atime e mtime puros
-                    }
-                    MetadataKind::Any | MetadataKind::Other | MetadataKind::Extended => {
-                        // O inotify frequentemente emite MetadataKind::Any no Linux
-                        // Inspecionamos os metadados atuais para emitir o evento correto
-                        for path in event.paths {
-                            if !Self::check_excluded(&path, active_exclusions) {
-                                if let Ok(meta) = std::fs::metadata(&path) {
-                                    let uid = meta.uid();
-                                    let gid = meta.gid();
-
-                                    let fim_ev = FimEvent::MetadataChanged {
-                                        is_dir: path.is_dir(),
-                                        path: path.clone(),
-                                        permissions: meta.mode(),
-                                        uid,
-                                        gid,
-                                    };
-                                    let _ = event_tx.blocking_send(fim_ev);
-                                }
-                            }
-                        }
+                    _ => {
+                        // Ignora atime, mtime e eventos de metadados genéricos para não gerar alertas duplicados ou confusos
                     }
                 }
             }

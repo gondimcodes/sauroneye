@@ -727,64 +727,6 @@ async fn handle_run(
                                 );
                             }
                         }
-                        crate::fim::engine::FimEvent::MetadataChanged { path, permissions, uid, gid, is_dir } => {
-                            if !analyzer.is_package_manager_active() {
-                                let key = format!("meta:{}:{:o}:{}:{}", path.display(), permissions & 0o777, uid, gid);
-                                let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_events_cache.get(&key) {
-                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
-                                        continue;
-                                    }
-                                }
-                                recent_events_cache.insert(key, now);
-
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
-
-                                let target_type = if is_dir { "Directory" } else { "File" };
-                                let user_display = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
-                                    .ok()
-                                    .flatten()
-                                    .map(|u| u.name)
-                                    .unwrap_or_else(|| uid.to_string());
-                                let group_display = nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid))
-                                    .ok()
-                                    .flatten()
-                                    .map(|g| g.name)
-                                    .unwrap_or_else(|| gid.to_string());
-
-                                let alert = AlertMessage::new(
-                                    &config.general.hostname,
-                                    &format!("PROTECTED {} METADATA MODIFIED", target_type.to_uppercase()),
-                                    AlertSeverity::Warning,
-                                    &format!(
-                                        "Metadata changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nPermissions: {:o}\nOwner: {}:{} (UID/GID: {}/{})",
-                                        target_type.to_lowercase(),
-                                        path.display(),
-                                        ip_origin_str,
-                                        permissions & 0o777,
-                                        user_display,
-                                        group_display,
-                                        uid,
-                                        gid
-                                    ),
-                                );
-                                dispatcher.dispatch(alert).await;
-                                let _ = db.record_audit_log(
-                                    "METADATA_CHANGED",
-                                    &ip_origin_str,
-                                    &format!("{}: {} (mode: {:o}, owner: {}:{}, uid: {}, gid: {})", target_type, path.display(), permissions & 0o777, user_display, group_display, uid, gid),
-                                );
-                            }
-                        }
                         crate::fim::engine::FimEvent::Deleted { path } => {
                             if !analyzer.is_package_manager_active() {
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
