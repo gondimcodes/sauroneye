@@ -166,15 +166,15 @@ pub fn generate_pdf_report(
     writer.text_at("CHRONOLOGICAL SECURITY AUDIT TRAIL", 10.0, MARGIN, true);
     writer.y -= 5.5;
 
-    // Colunas: A4 = 210mm, margens = 15mm cada lado → 180mm úteis
-    // Col 0: Timestamp  → x=15  (38mm de largura)
-    // Col 1: Action     → x=53  (30mm de largura)
-    // Col 2: Actor/IP   → x=83  (22mm de largura)
-    // Col 3: Details    → x=105 (90mm de largura, até borda = 195mm)
-    let col_ts = MARGIN; // 15
-    let col_action = MARGIN + 38.0; // 53
-    let col_actor = MARGIN + 68.0; // 83
-    let col_details = MARGIN + 98.0; // 113
+    // Colunas: A4 = 210mm, margens = 15mm cada lado → 180mm úteis (x vai de 15mm a 195mm)
+    // Col 0: Timestamp (UTC)   → x = 15.0  (largura ~26mm)
+    // Col 1: Action / Severity → x = 41.0  (largura ~37mm)
+    // Col 2: Actor / IP        → x = 78.0  (largura ~45mm para acomodar IPv6 completo)
+    // Col 3: Details / Path    → x = 123.0 (largura ~72mm até margem direita de 195mm)
+    let col_ts = MARGIN; // 15.0
+    let col_action = MARGIN + 26.0; // 41.0
+    let col_actor = MARGIN + 63.0; // 78.0
+    let col_details = MARGIN + 108.0; // 123.0
 
     writer.text_at("TIMESTAMP (UTC)", 7.5, col_ts, true);
     writer.text_at("ACTION / SEVERITY", 7.5, col_action, true);
@@ -182,8 +182,8 @@ pub fn generate_pdf_report(
     writer.text_at("DETAILS / FILE PATH", 7.5, col_details, true);
     writer.y -= 4.0;
 
-    // Largura disponível para detalhes em mm (~90mm) a ~1.85 chars/mm em 7pt
-    const DETAILS_MAX_CHARS: usize = 55;
+    // Largura disponível para detalhes em mm (~72mm) a ~1.85 chars/mm em 7pt
+    const DETAILS_MAX_CHARS: usize = 48;
 
     for entry in logs {
         writer.ensure_space(12.0);
