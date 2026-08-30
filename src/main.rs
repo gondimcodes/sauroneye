@@ -435,6 +435,10 @@ async fn handle_run(
     let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
     let _watcher = fim_engine.start_watcher(fim_tx)?;
 
+    // Cache de desduplicação (debounce) de eventos para evitar múltiplos alertas pelo mesmo evento de kernel
+    let mut recent_events_cache: std::collections::HashMap<String, std::time::Instant> =
+        std::collections::HashMap::new();
+
     // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -633,6 +637,15 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::PermissionsChanged { path, permissions, is_dir } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("chmod:{}:{:o}", path.display(), permissions & 0o777);
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_events_cache.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
+                                        continue;
+                                    }
+                                }
+                                recent_events_cache.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
@@ -667,6 +680,15 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, is_dir } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("chown:{}:{}:{}", path.display(), uid, gid);
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_events_cache.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
+                                        continue;
+                                    }
+                                }
+                                recent_events_cache.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
@@ -702,6 +724,15 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::MetadataChanged { path, permissions, uid, gid, is_dir } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("meta:{}:{:o}:{}:{}", path.display(), permissions & 0o777, uid, gid);
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_events_cache.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
+                                        continue;
+                                    }
+                                }
+                                recent_events_cache.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
