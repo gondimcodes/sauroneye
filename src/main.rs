@@ -443,6 +443,27 @@ async fn handle_run(
     let mut recent_alert_debounce: std::collections::HashMap<String, std::time::Instant> =
         std::collections::HashMap::new();
 
+    // Carrega o estado inicial das pastas e arquivos monitorados na inicialização
+    use std::os::unix::fs::MetadataExt;
+    for root in &config.fim.include_paths {
+        if root.exists() {
+            if let Ok(meta) = std::fs::metadata(root) {
+                known_permissions.insert(root.clone(), meta.mode() & 0o777);
+                known_ownership.insert(root.clone(), (meta.uid(), meta.gid()));
+            }
+            for entry in walkdir::WalkDir::new(root)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let path = entry.path().to_path_buf();
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                    known_ownership.insert(path, (meta.uid(), meta.gid()));
+                }
+            }
+        }
+    }
+
     // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;

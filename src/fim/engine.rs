@@ -278,45 +278,22 @@ impl FimEngine {
                             }
                         }
                     }
+                    MetadataKind::AccessTime | MetadataKind::WriteTime => {
+                        // Ignora atime e mtime puros
+                    }
                     _ => {
-                        // No Linux, o inotify despacha MetadataKind::Any para quase todas as operações de metadados
+                        // MetadataKind::Any / Other / Extended
+                        // Inspeciona os caminhos modificados
                         for path in event.paths {
                             if !Self::check_excluded(&path, active_exclusions) {
                                 if let Ok(meta) = std::fs::metadata(&path) {
                                     let is_dir = path.is_dir();
-                                    // 1. Notifica alteração de permissão
                                     let fim_perm = FimEvent::PermissionsChanged {
                                         is_dir,
                                         path: path.clone(),
                                         permissions: meta.mode(),
                                     };
                                     let _ = event_tx.blocking_send(fim_perm);
-
-                                    // 2. Notifica alteração de ownership
-                                    let uid = meta.uid();
-                                    let gid = meta.gid();
-                                    let user_name = nix::unistd::User::from_uid(
-                                        nix::unistd::Uid::from_raw(uid),
-                                    )
-                                    .ok()
-                                    .flatten()
-                                    .map(|u| u.name);
-                                    let group_name = nix::unistd::Group::from_gid(
-                                        nix::unistd::Gid::from_raw(gid),
-                                    )
-                                    .ok()
-                                    .flatten()
-                                    .map(|g| g.name);
-
-                                    let fim_owner = FimEvent::OwnershipChanged {
-                                        is_dir,
-                                        path: path.clone(),
-                                        uid,
-                                        gid,
-                                        user_name,
-                                        group_name,
-                                    };
-                                    let _ = event_tx.blocking_send(fim_owner);
                                 }
                             }
                         }
