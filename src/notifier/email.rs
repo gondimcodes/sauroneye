@@ -23,30 +23,39 @@ impl SmtpNotifier {
     fn build_transport(
         &self,
     ) -> Result<AsyncSmtpTransport<Tokio1Executor>, Box<dyn Error + Send + Sync>> {
+        let has_creds =
+            !self.config.username.trim().is_empty() && !self.config.password.trim().is_empty();
         let creds = Credentials::new(self.config.username.clone(), self.config.password.clone());
 
         if !self.config.use_tls {
-            let transport =
+            let mut builder =
                 AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
-                    .port(self.config.port)
-                    .credentials(creds)
-                    .build();
-            return Ok(transport);
+                    .port(self.config.port);
+            if has_creds {
+                builder = builder.credentials(creds);
+            }
+            return Ok(builder.build());
         }
 
         // Port 465 uses direct SMTPS (TLS wrapper), while 587/25 use STARTTLS
         let transport = if self.config.port == 465 {
             let tls_params = TlsParameters::builder(self.config.host.clone()).build_rustls()?;
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
-                .port(self.config.port)
-                .tls(Tls::Wrapper(tls_params))
-                .credentials(creds)
-                .build()
+            let mut builder =
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
+                    .port(self.config.port)
+                    .tls(Tls::Wrapper(tls_params));
+            if has_creds {
+                builder = builder.credentials(creds);
+            }
+            builder.build()
         } else {
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.config.host)?
-                .port(self.config.port)
-                .credentials(creds)
-                .build()
+            let mut builder =
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.config.host)?
+                    .port(self.config.port);
+            if has_creds {
+                builder = builder.credentials(creds);
+            }
+            builder.build()
         };
 
         Ok(transport)
