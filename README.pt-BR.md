@@ -1,7 +1,7 @@
 # SauronEye 👁️ [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=flat&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?business=7LD8SPXNF2KH2&no_recurring=0&item_name=Sua+contribui%C3%A7%C3%A3o+ajuda+a+manter+meu+estoque+de+caf%C3%A9+em+dia+%3A%29&currency_code=BRL)
 
 [![Rust](https://img.shields.io/badge/linguagem-Rust-orange.svg)](https://www.rust-lang.org/)
-[![Licença](https://img.shields.io/badge/licença-MIT%20OU%20Apache--2.0-blue.svg)](LICENSE)
+[![Licença](https://img.shields.io/badge/licença-GPL--3.0-blue.svg)](LICENSE)
 [![Segurança](https://img.shields.io/badge/segurança-Argon2id%20%7C%20BLAKE3-green.svg)](#arquitetura-de-segurança)
 
 > **"O Olho Que Tudo Vê"** — Monitoramento de Integridade de Arquivos (FIM) em Tempo Real, Sentinela de Linhagem de Processos, Auditor de Autenticação e Detector de RCE/Webshells em Rust.
@@ -208,15 +208,6 @@ Para passos detalhados de instalação em servidores de produção, configuraç�
 
 ---
 
-## Documentação Arquitetural
-
-Para o projeto executivo e especificações técnicas detalhadas em formato para impressão, consulte:
-- **[SauronEye_Plano_Arquitetural.pdf](SauronEye_Plano_Arquitetural.pdf)**
-
----
-
 ## Licença
 
-Distribuído sob licença dual:
-- Licença Apache, Versão 2.0 ([LICENSE-APACHE](LICENSE-APACHE) ou http://www.apache.org/licenses/LICENSE-2.0)
-- Licença MIT ([LICENSE-MIT](LICENSE-MIT) ou http://opensource.org/licenses/MIT)
+Distribuído sob a licença livre GNU General Public License v3.0 ([LICENSE](LICENSE)).

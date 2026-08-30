@@ -1,7 +1,7 @@
 # SauronEye 👁️ [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=flat&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?business=7LD8SPXNF2KH2&no_recurring=0&item_name=Sua+contribui%C3%A7%C3%A3o+ajuda+a+manter+meu+estoque+de+caf%C3%A9+em+dia+%3A%29&currency_code=BRL)
 
 [![Rust](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Security](https://img.shields.io/badge/security-Argon2id%20%7C%20BLAKE3-green.svg)](#security-architecture)
 
 > **"The Eye That Sees All"** — High-Performance File Integrity Monitoring (FIM), Process Lineage Sentinel, Authentication Auditor, and RCE/Webshell Detector for Linux.
@@ -208,15 +208,6 @@ For complete installation steps, systemd service configuration, and security har
 
 ---
 
-## Architectural Documentation
-
-For in-depth architectural blueprints and technical specifications, refer to:
-- **[SauronEye_Plano_Arquitetural.pdf](SauronEye_Plano_Arquitetural.pdf)**
-
----
-
 ## License
 
-Dual-licensed under either of:
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+Licensed under the GNU General Public License v3.0 ([LICENSE](LICENSE)).
