@@ -26,6 +26,8 @@ pub struct GeneralConfig {
     pub log_level: String,
     #[serde(default = "default_poll_interval")]
     pub poll_interval_ms: u64,
+    #[serde(default = "default_true")]
+    pub use_utc_time: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

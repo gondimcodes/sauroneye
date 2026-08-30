@@ -44,15 +44,30 @@ pub struct AlertMessage {
 
 impl AlertMessage {
     pub fn new(host: &str, title: &str, severity: AlertSeverity, details: &str) -> Self {
-        let now = chrono::Utc::now()
-            .format("%Y-%m-%d %H:%M:%S UTC")
-            .to_string();
+        Self::with_timezone(host, title, severity, details, true)
+    }
+
+    pub fn with_timezone(
+        host: &str,
+        title: &str,
+        severity: AlertSeverity,
+        details: &str,
+        use_utc: bool,
+    ) -> Self {
+        let timestamp = if use_utc {
+            chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string()
+        } else {
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+        };
+
         Self {
             host: host.to_string(),
             title: title.to_string(),
             severity,
             details: details.to_string(),
-            timestamp: now,
+            timestamp,
         }
     }
 

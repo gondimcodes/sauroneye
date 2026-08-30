@@ -6,6 +6,8 @@
 hostname = "production-server-01"
 log_level = "info"
 poll_interval_ms = 500
+# Timestamp format in alerts: true for UTC (e.g. 2026-08-30 18:15:00 UTC), false for system Local time
+use_utc_time = true
 
 [database]
 # Local SQLite3 database path
