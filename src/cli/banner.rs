@@ -11,18 +11,14 @@ pub const SAURONEYE_BANNER: &str = r#"
 
 pub fn print_banner(version: &str) {
     let amber = "\x1b[38;5;214m";
-    let cyan = "\x1b[36m";
-    let bold = "\x1b[1m";
     let reset = "\x1b[0m";
 
-    println!("{}{}{}", amber, SAURONEYE_BANNER, reset);
+    println!("{}{}", amber, SAURONEYE_BANNER);
+    println!("===============================================================================================");
     println!(
-        "{}Version:{} {:<15} | {}Author:{} Marcelo Gondim | {}License:{} MIT/Apache-2.0",
-        cyan, reset, version, cyan, reset, cyan, reset
+        "Version: {:<20} | Author: {:<30} | https://ispfocus.net.br",
+        version, "Marcelo Gondim <gondim@ispfocus.net.br>"
     );
-    println!(
-        "{}Real-Time FIM & Intrusion Sentinel Daemon — High Performance Rust Engine{}",
-        bold, reset
-    );
-    println!("{}\n", "=".repeat(95));
+    println!("Real-Time FIM & Intrusion Sentinel Daemon — High Performance Rust Engine");
+    println!("==============================================================================================={}", reset);
 }
