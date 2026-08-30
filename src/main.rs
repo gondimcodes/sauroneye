@@ -524,6 +524,16 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::Created { path, fingerprint } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("created:{}", path.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        let _ = db.save_fingerprints_batch(&[fingerprint]);
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
@@ -788,6 +798,16 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::Deleted { path } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("deleted:{}", path.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        let _ = db.delete_fingerprint(&path);
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
