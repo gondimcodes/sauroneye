@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
-use lettre::message::{Attachment, Body, MultiPart, SinglePart};
+use lettre::message::{Attachment, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::error::Error;
@@ -54,10 +54,9 @@ impl SmtpNotifier {
             .to_string_lossy()
             .to_string();
 
-        let pdf_content_type = ContentType::parse("application/pdf")
-            .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
-
-        let attachment = Attachment::new(file_name).body(Body::new(pdf_data), pdf_content_type);
+        let content_type = ContentType::parse("application/pdf")
+            .unwrap_or(ContentType::parse("application/octet-stream").unwrap());
+        let attachment = Attachment::new(file_name).body(pdf_data, content_type);
 
         let email = Message::builder()
             .from(self.config.from_address.parse()?)
