@@ -43,20 +43,22 @@ impl Analyzer {
             ("unknown".to_string(), "unknown".to_string())
         };
 
-        let has_lock = self.pkg_checker.is_package_manager_locked();
-        let is_pkg_mgr_process = self.pkg_checker.is_package_manager_process(&proc_name);
+        let is_pkg_running = self.pkg_checker.is_package_manager_locked();
+        let is_pkg_mgr_process = if proc_name != "unknown" {
+            self.pkg_checker.is_package_manager_process(&proc_name)
+        } else {
+            false
+        };
 
-        if has_lock && is_pkg_mgr_process {
+        // If package manager is actively running on the system, treat changes as legitimate system updates
+        if is_pkg_running || is_pkg_mgr_process {
             return AnalysisResult {
                 is_legitimate_update: true,
                 severity: AlertSeverity::Info,
-                title: "Legitimate System Update Detected".to_string(),
+                title: "Legitimate System Package Update Detected".to_string(),
                 details: format!(
-                    "File: {}\nProcess: {} (PID: {})\nCommand: {}\nPrevious Hash: {}\nNew Hash: {}",
+                    "File: {}\nContext: Package Manager Active (apt/dpkg/dnf)\nPrevious Hash: {}\nNew Hash: {}",
                     path.display(),
-                    proc_name,
-                    author_pid.unwrap_or(0),
-                    proc_cmdline,
                     old_fp.map(|f| f.hash_value.as_str()).unwrap_or("none"),
                     new_fp.hash_value
                 ),
