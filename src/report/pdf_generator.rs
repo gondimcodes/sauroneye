@@ -166,14 +166,27 @@ pub fn generate_pdf_report(
     writer.text_at("CHRONOLOGICAL SECURITY AUDIT TRAIL", 10.0, MARGIN, true);
     writer.y -= 5.5;
 
-    writer.text_at("TIMESTAMP (UTC)", 7.5, MARGIN, true);
-    writer.text_at("ACTION / SEVERITY", 7.5, MARGIN + 38.0, true);
-    writer.text_at("ACTOR / IP", 7.5, MARGIN + 85.0, true);
-    writer.text_at("DETAILS / FILE PATH", 7.5, MARGIN + 125.0, true);
+    // Colunas: A4 = 210mm, margens = 15mm cada lado → 180mm úteis
+    // Col 0: Timestamp  → x=15  (38mm de largura)
+    // Col 1: Action     → x=53  (30mm de largura)
+    // Col 2: Actor/IP   → x=83  (22mm de largura)
+    // Col 3: Details    → x=105 (90mm de largura, até borda = 195mm)
+    let col_ts = MARGIN; // 15
+    let col_action = MARGIN + 38.0; // 53
+    let col_actor = MARGIN + 68.0; // 83
+    let col_details = MARGIN + 98.0; // 113
+
+    writer.text_at("TIMESTAMP (UTC)", 7.5, col_ts, true);
+    writer.text_at("ACTION / SEVERITY", 7.5, col_action, true);
+    writer.text_at("ACTOR / IP", 7.5, col_actor, true);
+    writer.text_at("DETAILS / FILE PATH", 7.5, col_details, true);
     writer.y -= 4.0;
 
+    // Largura disponível para detalhes em mm (~90mm) a ~1.85 chars/mm em 7pt
+    const DETAILS_MAX_CHARS: usize = 55;
+
     for entry in logs {
-        writer.ensure_space(6.0);
+        writer.ensure_space(12.0);
 
         let ts_str = Utc
             .timestamp_opt(entry.timestamp, 0)
@@ -194,15 +207,34 @@ pub fn generate_pdf_report(
             actor_clean
         };
 
-        let details_first_line = entry.details.lines().next().unwrap_or("").trim();
-        let details_clean = sanitize(details_first_line);
-        let details_short: String = details_clean.chars().take(40).collect();
+        // Junta todas as linhas de detalhes em uma única string para exibição
+        let details_full = sanitize(&entry.details.replace('\n', " | "));
+        let chars: Vec<char> = details_full.chars().collect();
 
-        writer.text_at(&ts_str, 7.0, MARGIN, false);
-        writer.text_at(&action_clean, 7.0, MARGIN + 38.0, false);
-        writer.text_at(&actor_formatted, 7.0, MARGIN + 85.0, false);
-        writer.text_at(&details_short, 7.0, MARGIN + 125.0, false);
-        writer.y -= 4.2;
+        let line1: String = chars.iter().take(DETAILS_MAX_CHARS).collect();
+        let has_line2 = chars.len() > DETAILS_MAX_CHARS;
+        let line2: String = if has_line2 {
+            chars
+                .iter()
+                .skip(DETAILS_MAX_CHARS)
+                .take(DETAILS_MAX_CHARS)
+                .collect()
+        } else {
+            String::new()
+        };
+
+        writer.text_at(&ts_str, 7.0, col_ts, false);
+        writer.text_at(&action_clean, 7.0, col_action, false);
+        writer.text_at(&actor_formatted, 7.0, col_actor, false);
+        writer.text_at(&line1, 7.0, col_details, false);
+
+        if has_line2 {
+            writer.y -= 4.0;
+            writer.text_at(&line2, 7.0, col_details, false);
+            writer.y -= 4.2;
+        } else {
+            writer.y -= 4.2;
+        }
     }
 
     let mut warnings = Vec::new();
