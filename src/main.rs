@@ -534,6 +534,107 @@ async fn handle_run(
                             }
                             let _ = db.save_fingerprints_batch(&[fingerprint]);
                         }
+                        crate::fim::engine::FimEvent::DirectoryCreated { path, permissions, uid, gid } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "NEW DIRECTORY CREATED IN PROTECTED PATH",
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "A new directory was created in a monitored path:\n\nDirectory: {}\nActive User Origin IP(s): {}\nPermissions: {:o}\nOwner UID/GID: {}/{}",
+                                        path.display(),
+                                        ip_origin_str,
+                                        permissions & 0o777,
+                                        uid,
+                                        gid
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "DIR_CREATED",
+                                    &ip_origin_str,
+                                    &format!("Directory: {} (mode: {:o}, uid: {}, gid: {})", path.display(), permissions & 0o777, uid, gid),
+                                );
+                            }
+                        }
+                        crate::fim::engine::FimEvent::DirectoryDeleted { path } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "PROTECTED DIRECTORY DELETED / REMOVED",
+                                    AlertSeverity::Critical,
+                                    &format!(
+                                        "A monitored directory was permanently removed from disk:\n\nDirectory: {}\nActive User Origin IP(s): {}",
+                                        path.display(),
+                                        ip_origin_str
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "DIR_DELETED",
+                                    &ip_origin_str,
+                                    &format!("Directory removed: {}", path.display()),
+                                );
+                            }
+                        }
+                        crate::fim::engine::FimEvent::MetadataChanged { path, permissions, uid, gid, is_dir } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let target_type = if is_dir { "Directory" } else { "File" };
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    &format!("PROTECTED {} PERMISSIONS/OWNER MODIFIED", target_type.to_uppercase()),
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "Permissions or ownership changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Permissions: {:o}\nNew Owner UID/GID: {}/{}",
+                                        target_type.to_lowercase(),
+                                        path.display(),
+                                        ip_origin_str,
+                                        permissions & 0o777,
+                                        uid,
+                                        gid
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "METADATA_CHANGED",
+                                    &ip_origin_str,
+                                    &format!("{}: {} (mode: {:o}, uid: {}, gid: {})", target_type, path.display(), permissions & 0o777, uid, gid),
+                                );
+                            }
+                        }
                         crate::fim::engine::FimEvent::Deleted { path } => {
                             if !analyzer.is_package_manager_active() {
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();

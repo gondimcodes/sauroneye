@@ -23,6 +23,22 @@ pub enum FimEvent {
     Deleted {
         path: PathBuf,
     },
+    DirectoryCreated {
+        path: PathBuf,
+        permissions: u32,
+        uid: u32,
+        gid: u32,
+    },
+    DirectoryDeleted {
+        path: PathBuf,
+    },
+    MetadataChanged {
+        path: PathBuf,
+        permissions: u32,
+        uid: u32,
+        gid: u32,
+        is_dir: bool,
+    },
 }
 
 pub struct FimEngine {
@@ -175,11 +191,23 @@ impl FimEngine {
         hash_algo: HashAlgorithm,
         event_tx: &tokio_mpsc::Sender<FimEvent>,
     ) {
+        use std::os::unix::fs::MetadataExt;
+
         match event.kind {
             EventKind::Create(_) => {
                 for path in event.paths {
                     if !Self::check_excluded(&path, active_exclusions) {
-                        if path.is_file() {
+                        if path.is_dir() {
+                            if let Ok(meta) = std::fs::metadata(&path) {
+                                let fim_ev = FimEvent::DirectoryCreated {
+                                    path: path.clone(),
+                                    permissions: meta.mode(),
+                                    uid: meta.uid(),
+                                    gid: meta.gid(),
+                                };
+                                let _ = event_tx.blocking_send(fim_ev);
+                            }
+                        } else if path.is_file() {
                             if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
                                 let fim_ev = FimEvent::Created {
                                     path: path.clone(),
@@ -187,6 +215,22 @@ impl FimEngine {
                                 };
                                 let _ = event_tx.blocking_send(fim_ev);
                             }
+                        }
+                    }
+                }
+            }
+            EventKind::Modify(notify::event::ModifyKind::Metadata(_)) => {
+                for path in event.paths {
+                    if !Self::check_excluded(&path, active_exclusions) {
+                        if let Ok(meta) = std::fs::metadata(&path) {
+                            let fim_ev = FimEvent::MetadataChanged {
+                                is_dir: path.is_dir(),
+                                path: path.clone(),
+                                permissions: meta.mode(),
+                                uid: meta.uid(),
+                                gid: meta.gid(),
+                            };
+                            let _ = event_tx.blocking_send(fim_ev);
                         }
                     }
                 }
@@ -209,6 +253,7 @@ impl FimEngine {
             EventKind::Remove(_) => {
                 for path in event.paths {
                     if !Self::check_excluded(&path, active_exclusions) {
+                        // In remove event, path no longer exists on disk; send delete event
                         let fim_ev = FimEvent::Deleted { path };
                         let _ = event_tx.blocking_send(fim_ev);
                     }

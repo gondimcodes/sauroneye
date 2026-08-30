@@ -63,19 +63,24 @@ pub fn compute_file_hash<P: AsRef<Path>>(path: P, algorithm: HashAlgorithm) -> i
 mod tests {
     use super::*;
     use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_compute_hashes() {
-        let mut temp = NamedTempFile::new().unwrap();
-        writeln!(temp, "SauronEye Sentinel Verification").unwrap();
+        let temp_path =
+            std::env::temp_dir().join(format!("sauroneye_test_{}", rand::random::<u64>()));
+        {
+            let mut file = std::fs::File::create(&temp_path).unwrap();
+            writeln!(file, "SauronEye Sentinel Verification").unwrap();
+        }
 
-        let b3 = compute_file_hash(temp.path(), HashAlgorithm::Blake3).unwrap();
+        let b3 = compute_file_hash(&temp_path, HashAlgorithm::Blake3).unwrap();
         assert!(!b3.is_empty());
         assert_eq!(b3.len(), 64);
 
-        let xx = compute_file_hash(temp.path(), HashAlgorithm::Xxh3).unwrap();
+        let xx = compute_file_hash(&temp_path, HashAlgorithm::Xxh3).unwrap();
         assert!(!xx.is_empty());
         assert_eq!(xx.len(), 16);
+
+        let _ = std::fs::remove_file(&temp_path);
     }
 }
