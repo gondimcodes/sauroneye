@@ -160,6 +160,17 @@ impl FimEngine {
 
     fn check_excluded(path: &Path, exclude_patterns: &[String]) -> bool {
         let path_str = path.to_string_lossy();
+
+        // 1. Always ignore SQLite internal journal, WAL and shared memory files to avoid self-trigger feedback loops
+        if path_str.ends_with("-wal")
+            || path_str.ends_with("-shm")
+            || path_str.ends_with("-journal")
+            || path_str.contains("/sauron.db")
+        {
+            return true;
+        }
+
+        // 2. Custom user exclusions
         for pattern in exclude_patterns {
             if pattern.starts_with('*') {
                 let ext = &pattern[1..];
