@@ -309,9 +309,23 @@ fn handle_logs(
             .map(|d: DateTime<Utc>| d.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default();
         let details_first_line = log.details.lines().next().unwrap_or("").trim();
+
+        // Format Actor / IP cleanly (e.g. root:::1 -> root [::1], 192.168.1.10 -> [192.168.1.10])
+        let actor_formatted = if log.actor.contains(" [") && log.actor.ends_with(']') {
+            log.actor.clone()
+        } else if let Some((user, ip)) = log.actor.split_once(":::") {
+            format!("{} [::{}]", user, ip)
+        } else if let Some((user, ip)) = log.actor.split_once(':') {
+            format!("{} [{}]", user, ip)
+        } else if log.actor.contains('.') || log.actor.contains(':') {
+            format!("[{}]", log.actor)
+        } else {
+            log.actor.clone()
+        };
+
         println!(
             "{:<20} | {:<25} | {:<20} | {}",
-            ts_str, log.action, log.actor, details_first_line
+            ts_str, log.action, actor_formatted, details_first_line
         );
     }
     println!("{:-<120}\n", "");
@@ -595,7 +609,7 @@ async fn handle_run(
                                 dispatcher.dispatch(alert).await;
                                 let _ = db.record_audit_log(
                                     "AUTH_LOGIN_SUCCESS",
-                                    &format!("{}:{}", ev.user, ev.rhost.as_deref().unwrap_or("local")),
+                                    &format!("{} [{}]", ev.user, ev.rhost.as_deref().unwrap_or("local")),
                                     &format!("Service: {}\nLog: {}", ev.service, ev.raw_message),
                                 );
                             } else if !ev.success && config.auth_monitor.monitor_failed_attempts {
@@ -614,7 +628,7 @@ async fn handle_run(
                                 dispatcher.dispatch(alert).await;
                                 let _ = db.record_audit_log(
                                     "AUTH_LOGIN_FAILURE",
-                                    &format!("{}:{}", ev.user, ev.rhost.as_deref().unwrap_or("local")),
+                                    &format!("{} [{}]", ev.user, ev.rhost.as_deref().unwrap_or("local")),
                                     &format!("Service: {}\nLog: {}", ev.service, ev.raw_message),
                                 );
                             }

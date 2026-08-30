@@ -182,6 +182,17 @@ pub fn generate_pdf_report(
             .unwrap_or_default();
         let action_clean = sanitize(&entry.action);
         let actor_clean = sanitize(&entry.actor);
+        let actor_formatted = if actor_clean.contains(" [") && actor_clean.ends_with(']') {
+            actor_clean
+        } else if let Some((user, ip)) = actor_clean.split_once(":::") {
+            format!("{} [::{}]", user, ip)
+        } else if let Some((user, ip)) = actor_clean.split_once(':') {
+            format!("{} [{}]", user, ip)
+        } else if actor_clean.contains('.') || actor_clean.contains(':') {
+            format!("[{}]", actor_clean)
+        } else {
+            actor_clean
+        };
 
         let details_first_line = entry.details.lines().next().unwrap_or("").trim();
         let details_clean = sanitize(details_first_line);
@@ -189,7 +200,7 @@ pub fn generate_pdf_report(
 
         writer.text_at(&ts_str, 7.0, MARGIN, false);
         writer.text_at(&action_clean, 7.0, MARGIN + 38.0, false);
-        writer.text_at(&actor_clean, 7.0, MARGIN + 85.0, false);
+        writer.text_at(&actor_formatted, 7.0, MARGIN + 85.0, false);
         writer.text_at(&details_short, 7.0, MARGIN + 125.0, false);
         writer.y -= 4.2;
     }
