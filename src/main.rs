@@ -317,13 +317,25 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::Created { path, fingerprint } => {
                             if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
                                     "NEW FILE CREATED IN PROTECTED DIRECTORY",
                                     AlertSeverity::Warning,
                                     &format!(
-                                        "A new unindexed file was created in a monitored path:\n\nFile: {}\nSize: {} bytes\nHash ({}): {}",
+                                        "A new unindexed file was created in a monitored path:\n\nFile: {}\nActive User Origin IP(s): {}\nSize: {} bytes\nHash ({}): {}",
                                         path.display(),
+                                        ip_origin_str,
                                         fingerprint.size,
                                         fingerprint.hash_algorithm,
                                         fingerprint.hash_value
@@ -335,13 +347,25 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::Deleted { path } => {
                             if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
                                     "PROTECTED FILE DELETED / REMOVED",
                                     AlertSeverity::Critical,
                                     &format!(
-                                        "A monitored file was permanently removed from disk:\n\nFile: {}",
-                                        path.display()
+                                        "A monitored file was permanently removed from disk:\n\nFile: {}\nActive User Origin IP(s): {}",
+                                        path.display(),
+                                        ip_origin_str
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;

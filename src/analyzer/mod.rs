@@ -54,6 +54,18 @@ impl Analyzer {
             false
         };
 
+        // Correlate active logged-in IP addresses
+        let active_sessions = ProcessInspector::get_active_logged_in_ips();
+        let ip_origin_str = if !active_sessions.is_empty() {
+            active_sessions
+                .iter()
+                .map(|s| s.ip_origin.clone())
+                .collect::<Vec<String>>()
+                .join(", ")
+        } else {
+            "local console / service".to_string()
+        };
+
         // If package manager is actively running on the system, treat changes as legitimate system updates
         if is_pkg_running || is_pkg_mgr_process {
             return AnalysisResult {
@@ -74,8 +86,9 @@ impl Analyzer {
             severity: AlertSeverity::Critical,
             title: "UNAUTHORIZED FILE TAMPERING DETECTED".to_string(),
             details: format!(
-                "CRITICAL ALERT: File modification outside package manager!\n\nFile: {}\nAuthor Process: {} (PID: {})\nAuthor Command: {}\nPrevious Hash: {}\nNew Hash: {}",
+                "CRITICAL ALERT: File modification outside package manager!\n\nFile: {}\nActive User Origin IP(s): {}\nAuthor Process: {} (PID: {})\nAuthor Command: {}\nPrevious Hash: {}\nNew Hash: {}",
                 path.display(),
+                ip_origin_str,
                 proc_name,
                 author_pid.unwrap_or(0),
                 proc_cmdline,
