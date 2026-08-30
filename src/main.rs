@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     let config = Config::load_from_file(&cli.config)?;
 
-    // Initialize notification dispatcher
+    // Initialize notification dispatcher (Telegram & WhatsApp for real-time alerts)
     let mut dispatcher = AlertDispatcher::new();
     if let Some(ref tg) = config.notifications.telegram {
         if tg.enabled {
@@ -102,11 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(ref wa) = config.notifications.whatsapp {
         if wa.enabled {
             dispatcher.add_notifier(Arc::new(WhatsappNotifier::new(wa.clone())));
-        }
-    }
-    if let Some(ref smtp) = config.notifications.smtp {
-        if smtp.enabled {
-            dispatcher.add_notifier(Arc::new(SmtpNotifier::new(smtp.clone())));
         }
     }
     let dispatcher = Arc::new(dispatcher);
