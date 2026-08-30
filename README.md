@@ -60,37 +60,37 @@ How **SauronEye** compares against established security and integrity tools:
 ### 1. Initial Setup (One-Time Init)
 ```bash
 # Initialize database, set admin password, and record baseline scan
-sauroneye --config config.toml init
+sauroneye init
 ```
 
 ### 2. Run Monitoring Daemon
 ```bash
-# Run in foreground
-sauroneye --config config.toml run
+# Run in foreground (uses /etc/sauroneye/config.toml by default)
+sauroneye run
 ```
 
 ### 3. Authenticated Baseline Update (After Maintenance)
 ```bash
 # Requires admin password verification
-sauroneye --config config.toml update
+sauroneye update
 ```
 
 ### 4. Query Forensic Audit Logs
 ```bash
 # View security events between a timeframe in terminal (requires admin password)
-sauroneye --config config.toml logs --from "2026-08-30 00:00:00" --to "now"
+sauroneye logs --from "2026-08-30 00:00:00" --to "now"
 
 # Permanently purge old logs within a timeframe (requires admin password)
-sauroneye --config config.toml logs --from "1970-01-01 00:00:00" --to "2026-08-01 00:00:00" --purge
+sauroneye logs --from "1970-01-01 00:00:00" --to "2026-08-01 00:00:00" --purge
 ```
 
 ### 5. Generate & Email PDF Security Audit Reports
 ```bash
 # Generate executive forensic audit PDF report (requires admin password)
-sauroneye --config config.toml report --output /var/log/sauroneye/report.pdf --from "2026-08-30 00:00:00" --to "now"
+sauroneye report --output /var/log/sauroneye/report.pdf --from "2026-08-30 00:00:00" --to "now"
 
 # Generate PDF report and send via SMTP email directly from CLI
-sauroneye --config config.toml report --output /tmp/report.pdf --from "2026-08-01" --to "2026-08-30" --email "security@empresa.com.br"
+sauroneye report --output /tmp/report.pdf --from "2026-08-01" --to "2026-08-30" --email "security@empresa.com.br"
 ```
 
 ### 6. Check Sentinel Status

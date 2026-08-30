@@ -40,7 +40,7 @@ use crate::report::generate_pdf_report;
     long_about = None
 )]
 struct Cli {
-    #[arg(short, long, default_value = "config.toml")]
+    #[arg(short, long, default_value = "/etc/sauroneye/config.toml")]
     config: PathBuf,
 
     #[command(subcommand)]

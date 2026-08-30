@@ -60,37 +60,37 @@ Como o **SauronEye** se compara com ferramentas consagradas do mercado:
 ### 1. Inicialização Inicial (One-Time Init)
 ```bash
 # Inicializa a base SQLite, cadastra a senha do admin e executa a varredura da baseline
-sauroneye --config config.toml init
+sauroneye init
 ```
 
 ### 2. Execução do Daemon de Monitoramento
 ```bash
-# Executa em primeiro plano
-sauroneye --config config.toml run
+# Executa em primeiro plano (usa /etc/sauroneye/config.toml por padrão)
+sauroneye run
 ```
 
 ### 3. Atualização Autenticada de Baseline (Pós-Manutenção)
 ```bash
 # Requer confirmação da senha do administrador
-sauroneye --config config.toml update
+sauroneye update
 ```
 
 ### 4. Consultar Logs de Auditoria Forense
 ```bash
 # Visualizar incidentes e eventos de segurança por período no terminal (requer senha de admin)
-sauroneye --config config.toml logs --from "2026-08-30 00:00:00" --to "now"
+sauroneye logs --from "2026-08-30 00:00:00" --to "now"
 
 # Limpar/purgar logs antigos por período da base de dados (requer senha de admin)
-sauroneye --config config.toml logs --from "1970-01-01 00:00:00" --to "2026-08-01 00:00:00" --purge
+sauroneye logs --from "1970-01-01 00:00:00" --to "2026-08-01 00:00:00" --purge
 ```
 
 ### 5. Gerar e Enviar Relatório Forense em PDF por E-mail
 ```bash
 # Gerar relatório executivo forense em PDF (requer senha de admin)
-sauroneye --config config.toml report --output /var/log/sauroneye/relatorio.pdf --from "2026-08-30 00:00:00" --to "now"
+sauroneye report --output /var/log/sauroneye/relatorio.pdf --from "2026-08-30 00:00:00" --to "now"
 
 # Gerar relatório em PDF e despachar diretamente via SMTP para destinatário por e-mail
-sauroneye --config config.toml report --output /tmp/relatorio.pdf --from "2026-08-01" --to "2026-08-30" --email "seguranca@empresa.com.br"
+sauroneye report --output /tmp/relatorio.pdf --from "2026-08-01" --to "2026-08-30" --email "seguranca@empresa.com.br"
 ```
 
 ### 6. Verificação de Status
