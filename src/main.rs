@@ -678,7 +678,7 @@ async fn handle_run(
                                 );
                             }
                         }
-                        crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, is_dir } => {
+                        crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, user_name, group_name, is_dir } => {
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("chown:{}:{}:{}", path.display(), uid, gid);
                                 let now = std::time::Instant::now();
@@ -701,15 +701,20 @@ async fn handle_run(
                                 };
 
                                 let target_type = if is_dir { "Directory" } else { "File" };
+                                let user_display = user_name.unwrap_or_else(|| uid.to_string());
+                                let group_display = group_name.unwrap_or_else(|| gid.to_string());
+
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
                                     &format!("PROTECTED {} OWNERSHIP MODIFIED (CHOWN)", target_type.to_uppercase()),
                                     AlertSeverity::Warning,
                                     &format!(
-                                        "Ownership changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Owner UID/GID: {}/{}",
+                                        "Ownership changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Owner: {}:{} (UID/GID: {}/{})",
                                         target_type.to_lowercase(),
                                         path.display(),
                                         ip_origin_str,
+                                        user_display,
+                                        group_display,
                                         uid,
                                         gid
                                     ),
@@ -718,7 +723,7 @@ async fn handle_run(
                                 let _ = db.record_audit_log(
                                     "OWNERSHIP_CHANGED",
                                     &ip_origin_str,
-                                    &format!("{}: {} (uid: {}, gid: {})", target_type, path.display(), uid, gid),
+                                    &format!("{}: {} (owner: {}:{}, uid: {}, gid: {})", target_type, path.display(), user_display, group_display, uid, gid),
                                 );
                             }
                         }
@@ -745,16 +750,29 @@ async fn handle_run(
                                 };
 
                                 let target_type = if is_dir { "Directory" } else { "File" };
+                                let user_display = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+                                    .ok()
+                                    .flatten()
+                                    .map(|u| u.name)
+                                    .unwrap_or_else(|| uid.to_string());
+                                let group_display = nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid))
+                                    .ok()
+                                    .flatten()
+                                    .map(|g| g.name)
+                                    .unwrap_or_else(|| gid.to_string());
+
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
                                     &format!("PROTECTED {} METADATA MODIFIED", target_type.to_uppercase()),
                                     AlertSeverity::Warning,
                                     &format!(
-                                        "Metadata changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nPermissions: {:o}\nOwner UID/GID: {}/{}",
+                                        "Metadata changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nPermissions: {:o}\nOwner: {}:{} (UID/GID: {}/{})",
                                         target_type.to_lowercase(),
                                         path.display(),
                                         ip_origin_str,
                                         permissions & 0o777,
+                                        user_display,
+                                        group_display,
                                         uid,
                                         gid
                                     ),
@@ -763,7 +781,7 @@ async fn handle_run(
                                 let _ = db.record_audit_log(
                                     "METADATA_CHANGED",
                                     &ip_origin_str,
-                                    &format!("{}: {} (mode: {:o}, uid: {}, gid: {})", target_type, path.display(), permissions & 0o777, uid, gid),
+                                    &format!("{}: {} (mode: {:o}, owner: {}:{}, uid: {}, gid: {})", target_type, path.display(), permissions & 0o777, user_display, group_display, uid, gid),
                                 );
                             }
                         }

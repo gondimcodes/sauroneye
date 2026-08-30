@@ -45,6 +45,8 @@ pub enum FimEvent {
         path: PathBuf,
         uid: u32,
         gid: u32,
+        user_name: Option<String>,
+        group_name: Option<String>,
         is_dir: bool,
     },
     MetadataChanged {
@@ -255,11 +257,28 @@ impl FimEngine {
                         for path in event.paths {
                             if !Self::check_excluded(&path, active_exclusions) {
                                 if let Ok(meta) = std::fs::metadata(&path) {
+                                    let uid = meta.uid();
+                                    let gid = meta.gid();
+                                    let user_name = nix::unistd::User::from_uid(
+                                        nix::unistd::Uid::from_raw(uid),
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|u| u.name);
+                                    let group_name = nix::unistd::Group::from_gid(
+                                        nix::unistd::Gid::from_raw(gid),
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|g| g.name);
+
                                     let fim_ev = FimEvent::OwnershipChanged {
                                         is_dir: path.is_dir(),
                                         path: path.clone(),
-                                        uid: meta.uid(),
-                                        gid: meta.gid(),
+                                        uid,
+                                        gid,
+                                        user_name,
+                                        group_name,
                                     };
                                     let _ = event_tx.blocking_send(fim_ev);
                                 }
@@ -270,13 +289,20 @@ impl FimEngine {
                         // Ignora atime e mtime puros
                     }
                     MetadataKind::Any | MetadataKind::Other | MetadataKind::Extended => {
+                        // O inotify frequentemente emite MetadataKind::Any no Linux
+                        // Inspecionamos os metadados atuais para emitir o evento correto
                         for path in event.paths {
                             if !Self::check_excluded(&path, active_exclusions) {
                                 if let Ok(meta) = std::fs::metadata(&path) {
-                                    let fim_ev = FimEvent::PermissionsChanged {
+                                    let uid = meta.uid();
+                                    let gid = meta.gid();
+
+                                    let fim_ev = FimEvent::MetadataChanged {
                                         is_dir: path.is_dir(),
                                         path: path.clone(),
                                         permissions: meta.mode(),
+                                        uid,
+                                        gid,
                                     };
                                     let _ = event_tx.blocking_send(fim_ev);
                                 }
