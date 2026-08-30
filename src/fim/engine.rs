@@ -283,17 +283,42 @@ impl FimEngine {
                     }
                     _ => {
                         // MetadataKind::Any / Other / Extended
-                        // Inspeciona os caminhos modificados
+                        // No Linux, IN_ATTRIB é disparado para chmod E chown
+                        // Emite ambos os eventos; main.rs discrimina qual realmente mudou via state map
                         for path in event.paths {
                             if !Self::check_excluded(&path, active_exclusions) {
                                 if let Ok(meta) = std::fs::metadata(&path) {
                                     let is_dir = path.is_dir();
-                                    let fim_perm = FimEvent::PermissionsChanged {
+
+                                    let _ = event_tx.blocking_send(FimEvent::PermissionsChanged {
                                         is_dir,
                                         path: path.clone(),
                                         permissions: meta.mode(),
-                                    };
-                                    let _ = event_tx.blocking_send(fim_perm);
+                                    });
+
+                                    let uid = meta.uid();
+                                    let gid = meta.gid();
+                                    let user_name = nix::unistd::User::from_uid(
+                                        nix::unistd::Uid::from_raw(uid),
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|u| u.name);
+                                    let group_name = nix::unistd::Group::from_gid(
+                                        nix::unistd::Gid::from_raw(gid),
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|g| g.name);
+
+                                    let _ = event_tx.blocking_send(FimEvent::OwnershipChanged {
+                                        is_dir,
+                                        path: path.clone(),
+                                        uid,
+                                        gid,
+                                        user_name,
+                                        group_name,
+                                    });
                                 }
                             }
                         }
