@@ -51,6 +51,7 @@ How **SauronEye** compares against established security and integrity tools:
 | **Embedded Zero-Config Storage** | ✅ **SQLite3 (WAL Mode)** | ❌ Plain text / Gzip | ❌ Proprietary DB | ❌ Elasticsearch / SQLite | ❌ None (Streaming only) |
 | **One-Time Init & Anti-Tamper Guard** | ✅ **Yes** (Argon2id + Lock) | ❌ No | ❌ No | ⚠️ Manager-controlled | ❌ No |
 | **Native Telegram & WhatsApp Alerts** | ✅ **Yes** (Async REST) | ❌ Email only | ❌ Email only | ⚠️ Via custom scripts/server | ⚠️ Webhook sidecar |
+| **Forensic PDF Reports & SMTP Dispatch** | ✅ **Yes** (Pure Rust `printpdf` + SMTP) | ❌ Text log only | ❌ Text log only | ⚠️ Via Web Dashboard | ❌ External SIEM only |
 | **Resource Footprint & Dependencies** | 🚀 **Minimal** (Single static binary) | 🔹 Low (CLI only) | 🔹 Moderate | 🔴 Heavy (Server/Agent) | 🟡 Moderate (Kernel Driver) |
 
 ---

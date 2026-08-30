@@ -51,6 +51,7 @@ Como o **SauronEye** se compara com ferramentas consagradas do mercado:
 | **Armazenamento Embutido Zero-Config** | ✅ **SQLite3 (Modo WAL)** | ❌ Texto plano / Gzip | ❌ Banco proprietário | ❌ Elasticsearch / SQLite | ❌ Nenhum (Apenas stream) |
 | **Trava One-Time Init e Auto-Proteção** | ✅ **Sim** (Argon2id + Lock) | ❌ Não | ❌ Não | ⚠️ Controlado pelo Manager | ❌ Não |
 | **Alertas Nativos no Telegram e WhatsApp** | ✅ **Sim** (REST Assíncrono) | ❌ Apenas E-mail | ❌ Apenas E-mail | ⚠️ Via scripts/servidor | ⚠️ Webhook externo |
+| **Relatórios Forenses PDF e Envio SMTP** | ✅ **Sim** (Rust Puro `printpdf` + SMTP) | ❌ Apenas log texto | ❌ Apenas log texto | ⚠️ Via Painel Web | ❌ Apenas SIEM externo |
 | **Consumo de Recursos e Dependências** | 🚀 **Mínimo** (Binário único estático) | 🔹 Baixo (Apenas CLI) | 🔹 Moderado | 🔴 Pesado (Servidor/Agente) | 🟡 Moderado (Driver de Kernel) |
 
 ---
