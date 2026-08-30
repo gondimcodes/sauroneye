@@ -319,9 +319,15 @@ async fn handle_run(
                             if !analyzer.is_package_manager_active() {
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
-                                    "NEW FILE CREATED IN PROTECTED PATH",
+                                    "NEW FILE CREATED IN PROTECTED DIRECTORY",
                                     AlertSeverity::Warning,
-                                    &format!("New file detected: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                                    &format!(
+                                        "A new unindexed file was created in a monitored path:\n\nFile: {}\nSize: {} bytes\nHash ({}): {}",
+                                        path.display(),
+                                        fingerprint.size,
+                                        fingerprint.hash_algorithm,
+                                        fingerprint.hash_value
+                                    ),
                                 );
                                 dispatcher.dispatch(alert).await;
                             }
@@ -331,12 +337,16 @@ async fn handle_run(
                             if !analyzer.is_package_manager_active() {
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
-                                    "PROTECTED FILE DELETED",
+                                    "PROTECTED FILE DELETED / REMOVED",
                                     AlertSeverity::Critical,
-                                    &format!("File was removed: {}", path.display()),
+                                    &format!(
+                                        "A monitored file was permanently removed from disk:\n\nFile: {}",
+                                        path.display()
+                                    ),
                                 );
                                 dispatcher.dispatch(alert).await;
                             }
+                            let _ = db.delete_fingerprint(&path);
                         }
                     }
                 }

@@ -176,7 +176,20 @@ impl FimEngine {
         event_tx: &tokio_mpsc::Sender<FimEvent>,
     ) {
         match event.kind {
-            EventKind::Modify(_) | EventKind::Create(_) => {
+            EventKind::Create(_) => {
+                for path in event.paths {
+                    if path.is_file() && !Self::check_excluded(&path, active_exclusions) {
+                        if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
+                            let fim_ev = FimEvent::Created {
+                                path: path.clone(),
+                                fingerprint: fp,
+                            };
+                            let _ = event_tx.blocking_send(fim_ev);
+                        }
+                    }
+                }
+            }
+            EventKind::Modify(_) | EventKind::Any => {
                 for path in event.paths {
                     if path.is_file() && !Self::check_excluded(&path, active_exclusions) {
                         if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {

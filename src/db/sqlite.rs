@@ -161,6 +161,16 @@ impl Database {
         }
     }
 
+    pub fn delete_fingerprint(&self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let conn = self.conn.lock().unwrap();
+        let path_str = path.to_string_lossy();
+        conn.execute(
+            "DELETE FROM file_fingerprints WHERE path = ?1",
+            params![path_str],
+        )?;
+        Ok(())
+    }
+
     pub fn record_audit_log(
         &self,
         action: &str,
