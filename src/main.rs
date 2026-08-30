@@ -288,10 +288,7 @@ fn handle_logs(
         db.record_audit_log(
             "PURGE_LOGS",
             "admin",
-            &format!(
-                "Purged {} log records between {} and {}",
-                count, start_ts, end_ts
-            ),
+            &format!("Purged {} log records", count),
         )?;
         return Ok(());
     }
