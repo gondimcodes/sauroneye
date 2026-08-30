@@ -21,9 +21,22 @@ impl Database {
         let path_ref = path.as_ref();
         if let Some(parent) = path_ref.parent() {
             std::fs::create_dir_all(parent)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+            }
         }
 
         let conn = Connection::open(path_ref)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if path_ref.exists() {
+                let _ = std::fs::set_permissions(path_ref, std::fs::Permissions::from_mode(0o600));
+            }
+        }
 
         if enable_wal {
             conn.pragma_update(None, "journal_mode", "WAL")?;

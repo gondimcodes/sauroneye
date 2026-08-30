@@ -240,6 +240,9 @@ fn handle_status(
     config: &Config,
     db: &Database,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    authenticate_admin(db)?;
+
+    println!("\n👁️  === SauronEye Sentinel Status ===");
     println!("Host: {}", config.general.hostname);
     println!("Database Path: {}", config.database.path.display());
     println!(
@@ -250,8 +253,16 @@ fn handle_status(
             "No ❌"
         }
     );
-    println!("Monitored Directories: {:?}", config.fim.include_paths);
+    println!(
+        "Monitored Directories (FIM): {:?}",
+        config.fim.include_paths
+    );
     println!("Hash Algorithm: {}", config.fim.hash_algorithm);
+    println!(
+        "Package Manager Auto-Detect: {}",
+        config.package_manager.auto_detect
+    );
+    println!("RCE Anomaly Sentinel: {}\n", config.rce_detector.enabled);
     Ok(())
 }
 

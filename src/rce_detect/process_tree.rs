@@ -44,8 +44,18 @@ impl RceDetector {
                         if self.is_protected_service(&parent_comm) {
                             if let Some(child_exe) = ProcessInspector::get_process_exe(pid) {
                                 if self.is_forbidden_child(&child_exe) {
-                                    let child_cmd = ProcessInspector::get_process_cmdline(pid)
+                                    let raw_cmd = ProcessInspector::get_process_cmdline(pid)
                                         .unwrap_or_else(|| child_exe.clone());
+                                    let child_cmd: String = raw_cmd
+                                        .chars()
+                                        .map(|c| {
+                                            if c.is_control() || c == '\n' || c == '\r' {
+                                                ' '
+                                            } else {
+                                                c
+                                            }
+                                        })
+                                        .collect();
 
                                     alerts.push(RceAlert {
                                         parent_service: parent_comm,

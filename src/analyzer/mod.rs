@@ -40,8 +40,19 @@ impl Analyzer {
         let (proc_name, proc_cmdline) = if let Some(pid) = author_pid {
             let name =
                 ProcessInspector::get_process_name(pid).unwrap_or_else(|| "unknown".to_string());
-            let cmd =
+            let raw_cmd =
                 ProcessInspector::get_process_cmdline(pid).unwrap_or_else(|| "unknown".to_string());
+            // Sanitize command line: strip newlines and control characters to prevent log spoofing/injection
+            let cmd: String = raw_cmd
+                .chars()
+                .map(|c| {
+                    if c.is_control() || c == '\n' || c == '\r' {
+                        ' '
+                    } else {
+                        c
+                    }
+                })
+                .collect();
             (name, cmd)
         } else {
             ("unknown".to_string(), "unknown".to_string())
