@@ -35,7 +35,7 @@ nix = { version = "0.29", features = ["fs", "user", "signal", "process", "hostna
 libc = "0.2"
 
 # HTTP Client (Alerting: Telegram & WhatsApp)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 
 # Logging, Tracing & Time
 tracing = "0.1"

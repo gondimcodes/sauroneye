@@ -41,19 +41,23 @@ impl Notifier for WhatsappNotifier {
         }
 
         let message_text = alert.format_text();
-        let payload = WhatsappPayload {
-            number: &self.config.recipient_number,
-            text: &message_text,
-        };
 
-        let response = self
-            .client
-            .post(&self.config.endpoint_url)
-            .header("apikey", &self.config.api_key)
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+        let mut request = self.client.post(&self.config.endpoint_url);
+
+        // Include Authorization / apikey header only if api_key is non-empty
+        let key_trimmed = self.config.api_key.trim();
+        if !key_trimmed.is_empty() {
+            request = request
+                .header("apikey", key_trimmed)
+                .header("Authorization", format!("Bearer {}", key_trimmed));
+        }
+
+        // Send as multipart/form-data for whatsapp-bridge compatibility with fallback payload
+        let form = reqwest::multipart::Form::new()
+            .text("number", self.config.recipient_number.clone())
+            .text("message", message_text.clone());
+
+        let response = request.multipart(form).send().await?;
 
         if response.status().is_success() {
             info!("WhatsApp alert dispatched successfully: {}", alert.title);
