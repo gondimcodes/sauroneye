@@ -258,106 +258,123 @@ async fn handle_run(
     let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
     let _watcher = fim_engine.start_watcher(fim_tx)?;
 
+    // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let poll_interval = Duration::from_millis(config.general.poll_interval_ms);
 
     loop {
-        // 1. Process Real-Time FIM Events
-        while let Ok(fim_event) = fim_rx.try_recv() {
-            match fim_event {
-                crate::fim::engine::FimEvent::Modified {
-                    path,
-                    new_fingerprint,
-                } => {
-                    let old_fp = db.get_fingerprint(&path).ok().flatten();
-                    let is_different = if let Some(ref old) = old_fp {
-                        old.hash_value != new_fingerprint.hash_value
-                    } else {
-                        true
-                    };
-
-                    if is_different {
-                        let analysis = analyzer.analyze_modification(
-                            &path,
-                            None,
-                            old_fp.as_ref(),
-                            &new_fingerprint,
-                        );
-                        let alert = AlertMessage::new(
-                            &config.general.hostname,
-                            &analysis.title,
-                            analysis.severity,
-                            &analysis.details,
-                        );
-                        dispatcher.dispatch(alert).await;
-                        let _ = db.save_fingerprints_batch(&[new_fingerprint]);
-                    }
-                }
-                crate::fim::engine::FimEvent::Created { path, fingerprint } => {
-                    let alert = AlertMessage::new(
-                        &config.general.hostname,
-                        "NEW FILE CREATED IN PROTECTED PATH",
-                        AlertSeverity::Warning,
-                        &format!(
-                            "New file detected: {}\nHash: {}",
-                            path.display(),
-                            fingerprint.hash_value
-                        ),
-                    );
-                    dispatcher.dispatch(alert).await;
-                    let _ = db.save_fingerprints_batch(&[fingerprint]);
-                }
-                crate::fim::engine::FimEvent::Deleted { path } => {
-                    let alert = AlertMessage::new(
-                        &config.general.hostname,
-                        "PROTECTED FILE DELETED",
-                        AlertSeverity::Critical,
-                        &format!("File was removed: {}", path.display()),
-                    );
-                    dispatcher.dispatch(alert).await;
-                }
-            }
-        }
-
-        // 2. RCE & Process Anomaly Scan
-        if config.rce_detector.enabled {
-            let rce_alerts = rce_detector.scan_anomalies();
-            for rce in rce_alerts {
+        tokio::select! {
+            _ = sigterm.recv() => {
+                warn!("SIGTERM received. Shutting down SauronEye sentinel...");
                 let alert = AlertMessage::new(
                     &config.general.hostname,
-                    "RCE / ANOMALOUS SHELL SPAWN DETECTED",
+                    "SAURONEYE DAEMON STOPPED / TERMINATED (SIGTERM)",
                     AlertSeverity::Critical,
-                    &format!(
-                        "Protected Service: {} (PID: {})\nSpawned Child Command: {} (PID: {})",
-                        rce.parent_service, rce.parent_pid, rce.child_cmd, rce.child_pid
-                    ),
+                    "The sentinel daemon received a SIGTERM signal and is shutting down! Service was stopped or system is restarting.",
                 );
                 dispatcher.dispatch(alert).await;
+                break;
             }
-        }
+            _ = sigint.recv() => {
+                warn!("SIGINT (Ctrl+C) received. Shutting down SauronEye sentinel...");
+                let alert = AlertMessage::new(
+                    &config.general.hostname,
+                    "SAURONEYE DAEMON INTERRUPTED (SIGINT)",
+                    AlertSeverity::Critical,
+                    "The sentinel daemon was manually interrupted (SIGINT / Ctrl+C) and is shutting down!",
+                );
+                dispatcher.dispatch(alert).await;
+                break;
+            }
+            _ = sleep(poll_interval) => {
+                // 1. Process Real-Time FIM Events
+                while let Ok(fim_event) = fim_rx.try_recv() {
+                    match fim_event {
+                        crate::fim::engine::FimEvent::Modified { path, new_fingerprint } => {
+                            let old_fp = db.get_fingerprint(&path).ok().flatten();
+                            let is_different = if let Some(ref old) = old_fp {
+                                old.hash_value != new_fingerprint.hash_value
+                            } else {
+                                true
+                            };
 
-        // 3. Auth & Login Monitor
-        if config.auth_monitor.enabled {
-            if let Ok(auth_events) = pam_watcher.poll_new_events() {
-                for ev in auth_events {
-                    if ev.success && config.auth_monitor.monitor_successful_logins {
+                            if is_different {
+                                let analysis = analyzer.analyze_modification(&path, None, old_fp.as_ref(), &new_fingerprint);
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    &analysis.title,
+                                    analysis.severity,
+                                    &analysis.details,
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.save_fingerprints_batch(&[new_fingerprint]);
+                            }
+                        }
+                        crate::fim::engine::FimEvent::Created { path, fingerprint } => {
+                            let alert = AlertMessage::new(
+                                &config.general.hostname,
+                                "NEW FILE CREATED IN PROTECTED PATH",
+                                AlertSeverity::Warning,
+                                &format!("New file detected: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                            );
+                            dispatcher.dispatch(alert).await;
+                            let _ = db.save_fingerprints_batch(&[fingerprint]);
+                        }
+                        crate::fim::engine::FimEvent::Deleted { path } => {
+                            let alert = AlertMessage::new(
+                                &config.general.hostname,
+                                "PROTECTED FILE DELETED",
+                                AlertSeverity::Critical,
+                                &format!("File was removed: {}", path.display()),
+                            );
+                            dispatcher.dispatch(alert).await;
+                        }
+                    }
+                }
+
+                // 2. RCE & Process Anomaly Scan
+                if config.rce_detector.enabled {
+                    let rce_alerts = rce_detector.scan_anomalies();
+                    for rce in rce_alerts {
                         let alert = AlertMessage::new(
                             &config.general.hostname,
-                            "Successful User Login",
-                            AlertSeverity::Info,
+                            "RCE / ANOMALOUS SHELL SPAWN DETECTED",
+                            AlertSeverity::Critical,
                             &format!(
-                                "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
-                                ev.user,
-                                ev.service,
-                                ev.rhost.unwrap_or_else(|| "local".to_string()),
-                                ev.raw_message
+                                "Protected Service: {} (PID: {})\nSpawned Child Command: {} (PID: {})",
+                                rce.parent_service, rce.parent_pid, rce.child_cmd, rce.child_pid
                             ),
                         );
                         dispatcher.dispatch(alert).await;
                     }
                 }
+
+                // 3. Auth & Login Monitor
+                if config.auth_monitor.enabled {
+                    if let Ok(auth_events) = pam_watcher.poll_new_events() {
+                        for ev in auth_events {
+                            if ev.success && config.auth_monitor.monitor_successful_logins {
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "Successful User Login",
+                                    AlertSeverity::Info,
+                                    &format!(
+                                        "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
+                                        ev.user,
+                                        ev.service,
+                                        ev.rhost.unwrap_or_else(|| "local".to_string()),
+                                        ev.raw_message
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                            }
+                        }
+                    }
+                }
             }
         }
-
-        sleep(poll_interval).await;
     }
+
+    Ok(())
 }
