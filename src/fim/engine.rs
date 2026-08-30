@@ -236,38 +236,47 @@ impl FimEngine {
             }
             EventKind::Modify(notify::event::ModifyKind::Metadata(meta_kind)) => {
                 use notify::event::MetadataKind;
-                for path in event.paths {
-                    if !Self::check_excluded(&path, active_exclusions) {
-                        if let Ok(meta) = std::fs::metadata(&path) {
-                            let is_dir = path.is_dir();
-                            match meta_kind {
-                                MetadataKind::Permissions => {
+                match meta_kind {
+                    MetadataKind::Permissions => {
+                        for path in event.paths {
+                            if !Self::check_excluded(&path, active_exclusions) {
+                                if let Ok(meta) = std::fs::metadata(&path) {
                                     let fim_ev = FimEvent::PermissionsChanged {
+                                        is_dir: path.is_dir(),
                                         path: path.clone(),
                                         permissions: meta.mode(),
-                                        is_dir,
                                     };
                                     let _ = event_tx.blocking_send(fim_ev);
                                 }
-                                MetadataKind::Ownership => {
+                            }
+                        }
+                    }
+                    MetadataKind::Ownership => {
+                        for path in event.paths {
+                            if !Self::check_excluded(&path, active_exclusions) {
+                                if let Ok(meta) = std::fs::metadata(&path) {
                                     let fim_ev = FimEvent::OwnershipChanged {
+                                        is_dir: path.is_dir(),
                                         path: path.clone(),
                                         uid: meta.uid(),
                                         gid: meta.gid(),
-                                        is_dir,
                                     };
                                     let _ = event_tx.blocking_send(fim_ev);
                                 }
-                                MetadataKind::AccessTime | MetadataKind::WriteTime => {
-                                    // Ignora alterações puras de mtime/atime para evitar falsos positivos e duplicação
-                                }
-                                _ => {
-                                    let fim_ev = FimEvent::MetadataChanged {
-                                        is_dir,
+                            }
+                        }
+                    }
+                    MetadataKind::AccessTime | MetadataKind::WriteTime => {
+                        // Ignora atime e mtime puros
+                    }
+                    MetadataKind::Any | MetadataKind::Other | MetadataKind::Extended => {
+                        for path in event.paths {
+                            if !Self::check_excluded(&path, active_exclusions) {
+                                if let Ok(meta) = std::fs::metadata(&path) {
+                                    let fim_ev = FimEvent::PermissionsChanged {
+                                        is_dir: path.is_dir(),
                                         path: path.clone(),
                                         permissions: meta.mode(),
-                                        uid: meta.uid(),
-                                        gid: meta.gid(),
                                     };
                                     let _ = event_tx.blocking_send(fim_ev);
                                 }
