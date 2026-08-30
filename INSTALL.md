@@ -1,0 +1,135 @@
+# Installation & Deployment Guide — SauronEye 👁️
+
+This guide covers building, configuring, and installing **SauronEye** as a system daemon on Linux servers.
+
+---
+
+*Read this in other languages: [English](INSTALL.md) | [Português (Brasil)](INSTALL.pt-BR.md)*
+
+---
+
+## Prerequisites
+
+- **Linux Kernel:** 5.4 or newer (supports `fanotify`, `/proc` connectors, and Netlink interfaces).
+- **Rust Toolchain:** Rust 1.75+ (`rustc` and `cargo`).
+- **Build Utilities:** `build-essential`, `pkg-config`, `libssl-dev` (or distro equivalents).
+
+```bash
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev
+
+# RHEL / Rocky Linux / AlmaLinux
+sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y pkgconfig openssl-devel
+
+# Alpine Linux
+apk add build-base pkgconfig openssl-dev
+```
+
+---
+
+## 1. Building the Release Binary
+
+Compile an optimized, standalone binary:
+
+```bash
+cd sauroneye
+cargo build --release
+```
+
+The compiled binary will be located at `target/release/sauroneye`.
+
+---
+
+## 2. Directory Layout & Permissions
+
+Create the standard runtime directories and install the binary:
+
+```bash
+# 1. Install binary to system path
+sudo install -m 755 target/release/sauroneye /usr/local/bin/sauroneye
+
+# 2. Create configuration and database directories with restricted permissions
+sudo mkdir -p /etc/sauroneye
+sudo mkdir -p /var/lib/sauroneye
+sudo chmod 700 /etc/sauroneye /var/lib/sauroneye
+
+# 3. Copy configuration template
+sudo cp config.toml.example /etc/sauroneye/config.toml
+sudo chmod 600 /etc/sauroneye/config.toml
+```
+
+---
+
+## 3. Configuring SauronEye
+
+Edit `/etc/sauroneye/config.toml` to customize monitored directories, notification channels (Telegram, WhatsApp), and server hostname:
+
+```bash
+sudo nano /etc/sauroneye/config.toml
+```
+
+---
+
+## 4. Initializing the Database (One-Time Init)
+
+Run the initial setup to generate the SQLite database, configure the admin password (hashed with Argon2id), and record the initial baseline scan:
+
+```bash
+sudo sauroneye --config /etc/sauroneye/config.toml init
+```
+
+> **Security Note:** Once initialized, the `--init` command is permanently locked to prevent unauthorized tampering. Future baseline refreshes must be executed via `sauroneye update` using the admin password.
+
+---
+
+## 5. Setting Up Systemd Service
+
+Create the systemd unit file at `/etc/systemd/system/sauroneye.service`:
+
+```ini
+[Unit]
+Description=SauronEye — Real-Time FIM & Intrusion Sentinel Daemon
+After=network.target auditd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sauroneye --config /etc/sauroneye/config.toml run
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+
+# Hardening Directives
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/sauroneye
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the daemon:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now sauroneye
+sudo systemctl status sauroneye
+```
+
+---
+
+## 6. Verification & Health Check
+
+Verify that SauronEye is running and inspecting the system:
+
+```bash
+# Check status via CLI
+sudo sauroneye --config /etc/sauroneye/config.toml status
+
+# View live sentinel logs
+sudo journalctl -u sauroneye -f
+```

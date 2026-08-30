@@ -1,0 +1,91 @@
+# ==============================================================================
+# SauronEye — Configuration File
+# ==============================================================================
+
+[general]
+hostname = "production-server-01"
+log_level = "info"
+poll_interval_ms = 500
+
+[database]
+# Local SQLite3 database path
+path = "/var/lib/sauroneye/sauron.db"
+enable_wal = true
+batch_flush_interval_ms = 1000
+
+[fim]
+# Backend: "auto" (prefers fanotify with fallback to inotify)
+backend = "auto"
+# Fingerprinting algorithm: "blake3" or "xxh3" (with scalar CPU fallback)
+hash_algorithm = "blake3"
+
+# Critical directories and files for real-time integrity monitoring
+include_paths = [
+    "/etc",
+    "/usr/bin",
+    "/usr/sbin",
+    "/bin",
+    "/sbin",
+    "/boot",
+    "/root/.ssh"
+]
+
+# Excluded patterns and transient noise paths
+exclude_paths = [
+    "/etc/mtab",
+    "/etc/resolv.conf",
+    "*.swp",
+    "*.tmp"
+]
+
+[package_manager]
+# Automatically detects official package updates (dpkg, rpm, pacman, apk) to avoid false positives
+auto_detect = true
+check_package_db = true
+
+[auth_monitor]
+enabled = true
+monitor_successful_logins = true
+monitor_failed_attempts = true
+track_sudo_elevation = true
+
+[rce_detector]
+enabled = true
+# Protected daemons monitored against anomalous child process spawning
+protected_services = [
+    "nginx",
+    "apache2",
+    "httpd",
+    "php-fpm",
+    "named",
+    "unbound",
+    "mysqld",
+    "redis-server"
+]
+# Strictly forbidden binaries when invoked by network service daemons
+forbidden_children = [
+    "/bin/sh",
+    "/bin/bash",
+    "/bin/dash",
+    "/usr/bin/python*",
+    "/usr/bin/perl",
+    "/usr/bin/curl",
+    "/usr/bin/wget",
+    "/usr/bin/nc",
+    "/usr/bin/ncat",
+    "/usr/bin/socat"
+]
+
+[notifications.telegram]
+enabled = true
+bot_token = "YOUR_BOT_TOKEN_HERE"
+chat_id = "-1001234567890"
+silent = false
+timeout_secs = 10
+
+[notifications.whatsapp]
+enabled = false
+endpoint_url = "https://api.myserver.com/message/sendText/instance"
+api_key = "YOUR_API_KEY_HERE"
+recipient_number = "5511999999999"
+timeout_secs = 10

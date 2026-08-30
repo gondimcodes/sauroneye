@@ -1,0 +1,6 @@
+/target
+*.swp
+*.tmp
+*.bak
+sauron.db*
+config.toml
