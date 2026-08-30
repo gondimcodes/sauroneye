@@ -130,3 +130,14 @@ endpoint_url = "https://api.myserver.com/message/sendText/instance"
 api_key = "YOUR_API_KEY_HERE"
 recipient_number = "5511999999999"
 timeout_secs = 10
+
+[notifications.smtp]
+enabled = false
+host = "smtp.myserver.com"
+port = 587
+username = "alerts@myserver.com"
+password = "SECRET_PASSWORD"
+from_address = "SauronEye Sentinel <alerts@myserver.com>"
+# Default recipient for automated system email alerts
+to_default = "security-team@myserver.com"
+use_tls = true

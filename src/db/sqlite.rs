@@ -160,7 +160,18 @@ impl Database {
             Err(e) => Err(Box::new(e)),
         }
     }
+}
 
+#[derive(Debug, Clone)]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub timestamp: i64,
+    pub action: String,
+    pub actor: String,
+    pub details: String,
+}
+
+impl Database {
     pub fn delete_fingerprint(&self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
         let conn = self.conn.lock().unwrap();
         let path_str = path.to_string_lossy();
@@ -184,6 +195,46 @@ impl Database {
             params![now, action, actor, details],
         )?;
         Ok(())
+    }
+
+    pub fn query_audit_logs(
+        &self,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<Vec<AuditLogEntry>, Box<dyn Error + Send + Sync>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, action, actor, details FROM audit_logs WHERE timestamp >= ?1 AND timestamp <= ?2 ORDER BY timestamp ASC, id ASC"
+        )?;
+
+        let rows = stmt.query_map(params![start_ts, end_ts], |row| {
+            Ok(AuditLogEntry {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                action: row.get(2)?,
+                actor: row.get(3)?,
+                details: row.get(4)?,
+            })
+        })?;
+
+        let mut entries = Vec::new();
+        for r in rows {
+            entries.push(r?);
+        }
+        Ok(entries)
+    }
+
+    pub fn purge_audit_logs(
+        &self,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<usize, Box<dyn Error + Send + Sync>> {
+        let conn = self.conn.lock().unwrap();
+        let count = conn.execute(
+            "DELETE FROM audit_logs WHERE timestamp >= ?1 AND timestamp <= ?2",
+            params![start_ts, end_ts],
+        )?;
+        Ok(count)
     }
 
     pub fn get_db_path(&self) -> &Path {

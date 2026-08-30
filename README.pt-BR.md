@@ -75,7 +75,25 @@ sauroneye --config config.toml run
 sauroneye --config config.toml update
 ```
 
-### 4. Verificação de Status
+### 4. Consultar Logs de Auditoria Forense
+```bash
+# Visualizar incidentes e eventos de segurança por período no terminal (requer senha de admin)
+sauroneye --config config.toml logs --from "2026-08-30 00:00:00" --to "now"
+
+# Limpar/purgar logs antigos por período da base de dados (requer senha de admin)
+sauroneye --config config.toml logs --from "1970-01-01 00:00:00" --to "2026-08-01 00:00:00" --purge
+```
+
+### 5. Gerar e Enviar Relatório Forense em PDF por E-mail
+```bash
+# Gerar relatório executivo forense em PDF (requer senha de admin)
+sauroneye --config config.toml report --output /var/log/sauroneye/relatorio.pdf --from "2026-08-30 00:00:00" --to "now"
+
+# Gerar relatório em PDF e despachar diretamente via SMTP para destinatário por e-mail
+sauroneye --config config.toml report --output /tmp/relatorio.pdf --from "2026-08-01" --to "2026-08-30" --email "seguranca@empresa.com.br"
+```
+
+### 6. Verificação de Status
 ```bash
 sauroneye --config config.toml status
 ```

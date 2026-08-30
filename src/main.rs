@@ -8,7 +8,9 @@ mod db;
 mod fim;
 mod notifier;
 mod rce_detect;
+mod report;
 
+use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,18 +22,23 @@ use crate::analyzer::Analyzer;
 use crate::auth::pam_watcher::PamWatcher;
 use crate::cli::auth_prompt::AuthPrompt;
 use crate::cli::banner::print_banner;
+use crate::cli::time_parser::parse_time_argument;
 use crate::config::Config;
 use crate::db::user::AdminAuth;
 use crate::db::Database;
 use crate::fim::FimEngine;
 use crate::notifier::{
-    AlertDispatcher, AlertMessage, AlertSeverity, TelegramNotifier, WhatsappNotifier,
+    AlertDispatcher, AlertMessage, AlertSeverity, SmtpNotifier, TelegramNotifier, WhatsappNotifier,
 };
 use crate::rce_detect::RceDetector;
+use crate::report::generate_pdf_report;
 
 #[derive(Parser)]
 #[command(name = "sauroneye")]
-#[command(about = "SauronEye — Real-time File Integrity Monitoring, Auth Auditing & Intrusion Sentinel", long_about = None)]
+#[command(
+    about = "SauronEye — Real-time File Integrity Monitoring, Auth Auditing & Intrusion Sentinel",
+    long_about = None
+)]
 struct Cli {
     #[arg(short, long, default_value = "config.toml")]
     config: PathBuf,
@@ -50,6 +57,26 @@ enum Commands {
     Run,
     /// Displays current configuration and database status
     Status,
+    /// Queries or purges forensic audit logs within a date/time range (requires admin authentication)
+    Logs {
+        #[arg(long, default_value = "1970-01-01 00:00:00")]
+        from: String,
+        #[arg(long, default_value = "now")]
+        to: String,
+        #[arg(long)]
+        purge: bool,
+    },
+    /// Generates executive PDF forensic audit report and optionally sends via SMTP email (requires admin authentication)
+    Report {
+        #[arg(short, long, default_value = "sauroneye_report.pdf")]
+        output: PathBuf,
+        #[arg(long, default_value = "1970-01-01 00:00:00")]
+        from: String,
+        #[arg(long, default_value = "now")]
+        to: String,
+        #[arg(long)]
+        email: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -77,6 +104,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             dispatcher.add_notifier(Arc::new(WhatsappNotifier::new(wa.clone())));
         }
     }
+    if let Some(ref smtp) = config.notifications.smtp {
+        if smtp.enabled {
+            dispatcher.add_notifier(Arc::new(SmtpNotifier::new(smtp.clone())));
+        }
+    }
     let dispatcher = Arc::new(dispatcher);
 
     let db = Database::open(&config.database.path, config.database.enable_wal)?;
@@ -94,8 +126,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Commands::Run => {
             handle_run(config, db, dispatcher).await?;
         }
+        Commands::Logs { from, to, purge } => {
+            handle_logs(&config, &db, &from, &to, purge)?;
+        }
+        Commands::Report {
+            output,
+            from,
+            to,
+            email,
+        } => {
+            handle_report(&config, &db, &output, &from, &to, email.as_deref()).await?;
+        }
     }
 
+    Ok(())
+}
+
+fn authenticate_admin(db: &Database) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if !db.is_initialized()? {
+        eprintln!("❌ System is not initialized yet. Run 'sauroneye --init' first.");
+        std::process::exit(1);
+    }
+
+    let password = AuthPrompt::prompt_password("Enter admin password: ")?;
+    if !db.verify_admin_login(&password)? {
+        eprintln!("❌ Authentication failed: Invalid admin credentials.");
+        std::process::exit(1);
+    }
+    println!("🔓 Admin authentication verified.");
     Ok(())
 }
 
@@ -154,27 +212,9 @@ async fn handle_update(
     db: &Database,
     dispatcher: &Arc<AlertDispatcher>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if !db.is_initialized()? {
-        eprintln!("❌ System is not initialized yet. Run 'sauroneye --init' first.");
-        std::process::exit(1);
-    }
+    authenticate_admin(db)?;
 
     println!("👁️  === Authenticated Baseline Update (sauroneye --update) ===");
-    let password = AuthPrompt::prompt_password("Enter admin password: ")?;
-
-    if !db.verify_admin_login(&password)? {
-        let alert = AlertMessage::new(
-            &config.general.hostname,
-            "AUTHENTICATION FAILURE ON --update COMMAND",
-            AlertSeverity::Critical,
-            "Unauthorized baseline update attempt with incorrect admin credentials!",
-        );
-        dispatcher.dispatch(alert).await;
-        eprintln!("❌ Incorrect admin password! Unauthorized attempt logged.");
-        std::process::exit(1);
-    }
-
-    println!("🔓 Admin authentication verified.");
     println!("🔍 Rescanning directories and recalculating fingerprints...");
     let fim_engine = FimEngine::new(config.fim.clone(), config.distro_exclusions.clone());
     let fingerprints = fim_engine.scan_baseline();
@@ -205,7 +245,6 @@ fn handle_status(
     config: &Config,
     db: &Database,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    println!("👁️  === SauronEye Sentinel Status ===");
     println!("Host: {}", config.general.hostname);
     println!("Database Path: {}", config.database.path.display());
     println!(
@@ -218,6 +257,123 @@ fn handle_status(
     );
     println!("Monitored Directories: {:?}", config.fim.include_paths);
     println!("Hash Algorithm: {}", config.fim.hash_algorithm);
+    Ok(())
+}
+
+fn handle_logs(
+    _config: &Config,
+    db: &Database,
+    from: &str,
+    to: &str,
+    purge: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    authenticate_admin(db)?;
+
+    let start_ts =
+        parse_time_argument(from).map_err(|e| format!("Error in --from parameter: {}", e))?;
+    let end_ts = parse_time_argument(to).map_err(|e| format!("Error in --to parameter: {}", e))?;
+
+    if purge {
+        let count = db.purge_audit_logs(start_ts, end_ts)?;
+        println!(
+            "🗑️  Purge complete: {} audit log entries permanently removed from database.",
+            count
+        );
+        db.record_audit_log(
+            "PURGE_LOGS",
+            "admin",
+            &format!(
+                "Purged {} log records between {} and {}",
+                count, start_ts, end_ts
+            ),
+        )?;
+        return Ok(());
+    }
+
+    let logs = db.query_audit_logs(start_ts, end_ts)?;
+    println!(
+        "\n📜 === SauronEye Forensic Audit Logs (Total: {}) ===",
+        logs.len()
+    );
+    println!("{:-<120}", "");
+    println!(
+        "{:<20} | {:<25} | {:<20} | {}",
+        "Timestamp (UTC)", "Action", "Actor / IP", "Details"
+    );
+    println!("{:-<120}", "");
+
+    for log in logs {
+        let ts_str = Utc
+            .timestamp_opt(log.timestamp, 0)
+            .single()
+            .map(|d: DateTime<Utc>| d.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_default();
+        let details_first_line = log.details.lines().next().unwrap_or("").trim();
+        println!(
+            "{:<20} | {:<25} | {:<20} | {}",
+            ts_str, log.action, log.actor, details_first_line
+        );
+    }
+    println!("{:-<120}\n", "");
+    Ok(())
+}
+
+async fn handle_report(
+    config: &Config,
+    db: &Database,
+    output: &PathBuf,
+    from: &str,
+    to: &str,
+    email_dest: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    authenticate_admin(db)?;
+
+    let start_ts =
+        parse_time_argument(from).map_err(|e| format!("Error in --from parameter: {}", e))?;
+    let end_ts = parse_time_argument(to).map_err(|e| format!("Error in --to parameter: {}", e))?;
+
+    println!("📊 Generating Forensic Security Audit PDF Report...");
+    let logs = db.query_audit_logs(start_ts, end_ts)?;
+
+    generate_pdf_report(&config.general.hostname, start_ts, end_ts, &logs, output)?;
+    println!("✅ PDF Report generated successfully: {}", output.display());
+
+    db.record_audit_log(
+        "GENERATE_REPORT",
+        "admin",
+        &format!(
+            "PDF report generated: {} ({} records)",
+            output.display(),
+            logs.len()
+        ),
+    )?;
+
+    if let Some(to_email) = email_dest {
+        println!("📧 Dispatching PDF Report via SMTP to {}...", to_email);
+        let smtp_cfg = match &config.notifications.smtp {
+            Some(s) if s.enabled => s.clone(),
+            _ => {
+                eprintln!("❌ SMTP is not configured or disabled in config.toml!");
+                return Err("SMTP disabled".into());
+            }
+        };
+
+        let mailer = SmtpNotifier::new(smtp_cfg);
+        let subject = format!(
+            "[SAURONEYE - REPORT] Security Audit Report — {}",
+            config.general.hostname
+        );
+        let body = format!(
+            "Hello,\n\nPlease find attached the official SauronEye Forensic Security Audit PDF Report for host {}.\n\nTimeframe: {} to {}\nTotal Recorded Incidents: {}\n\nGenerated automatically by SauronEye Sentinel.",
+            config.general.hostname, from, to, logs.len()
+        );
+
+        mailer
+            .send_pdf_report(to_email, &subject, &body, output)
+            .await?;
+        println!("✅ Email dispatched successfully with attached PDF report!");
+    }
+
     Ok(())
 }
 
@@ -253,6 +409,7 @@ async fn handle_run(
         ),
     );
     dispatcher.dispatch(startup_alert).await;
+    let _ = db.record_audit_log("DAEMON_START", "system", "SauronEye Sentinel started");
 
     // Inicia o watcher em tempo real de eventos do sistema de arquivos
     let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
@@ -273,6 +430,7 @@ async fn handle_run(
                     AlertSeverity::Critical,
                     "The sentinel daemon received a SIGTERM signal and is shutting down! Service was stopped or system is restarting.",
                 );
+                let _ = db.record_audit_log("DAEMON_STOP", "system", "SauronEye stopped by SIGTERM");
                 let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
                 std::process::exit(0);
             }
@@ -284,6 +442,7 @@ async fn handle_run(
                     AlertSeverity::Critical,
                     "The sentinel daemon was manually interrupted (SIGINT / Ctrl+C) and is shutting down!",
                 );
+                let _ = db.record_audit_log("DAEMON_STOP", "system", "SauronEye interrupted by SIGINT");
                 let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
                 std::process::exit(0);
             }
@@ -312,6 +471,11 @@ async fn handle_run(
                                     );
                                     dispatcher.dispatch(alert).await;
                                 }
+                                let _ = db.record_audit_log(
+                                    if analysis.is_legitimate_update { "PACKAGE_UPDATE" } else { "FILE_TAMPERING" },
+                                    "process",
+                                    &format!("File: {}\nHash: {}", path.display(), new_fingerprint.hash_value),
+                                );
                                 let _ = db.save_fingerprints_batch(&[new_fingerprint]);
                             }
                         }
@@ -342,6 +506,11 @@ async fn handle_run(
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "FILE_CREATED",
+                                    &ip_origin_str,
+                                    &format!("File: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                                );
                             }
                             let _ = db.save_fingerprints_batch(&[fingerprint]);
                         }
@@ -369,6 +538,11 @@ async fn handle_run(
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "FILE_DELETED",
+                                    &ip_origin_str,
+                                    &format!("File removed: {}", path.display()),
+                                );
                             }
                             let _ = db.delete_fingerprint(&path);
                         }
@@ -389,6 +563,11 @@ async fn handle_run(
                             ),
                         );
                         dispatcher.dispatch(alert).await;
+                        let _ = db.record_audit_log(
+                            "RCE_ANOMALY",
+                            &rce.parent_service,
+                            &format!("Spawned: {} (PID: {})", rce.child_cmd, rce.child_pid),
+                        );
                     }
                 }
 
@@ -409,11 +588,16 @@ async fn handle_run(
                                         "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
                                         ev.user,
                                         ev.service,
-                                        ev.rhost.unwrap_or_else(|| "local".to_string()),
+                                        ev.rhost.as_deref().unwrap_or("local"),
                                         ev.raw_message
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "AUTH_LOGIN_SUCCESS",
+                                    &format!("{}:{}", ev.user, ev.rhost.as_deref().unwrap_or("local")),
+                                    &format!("Service: {}\nLog: {}", ev.service, ev.raw_message),
+                                );
                             } else if !ev.success && config.auth_monitor.monitor_failed_attempts {
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
@@ -423,11 +607,16 @@ async fn handle_run(
                                         "User: {}\nService: {}\nOrigin: {}\nRaw Log: {}",
                                         ev.user,
                                         ev.service,
-                                        ev.rhost.unwrap_or_else(|| "local".to_string()),
+                                        ev.rhost.as_deref().unwrap_or("local"),
                                         ev.raw_message
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "AUTH_LOGIN_FAILURE",
+                                    &format!("{}:{}", ev.user, ev.rhost.as_deref().unwrap_or("local")),
+                                    &format!("Service: {}\nLog: {}", ev.service, ev.raw_message),
+                                );
                             }
                         }
                     }

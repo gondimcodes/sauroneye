@@ -140,6 +140,28 @@ pub struct NotificationsConfig {
     pub telegram: Option<TelegramConfig>,
     #[serde(default)]
     pub whatsapp: Option<WhatsappConfig>,
+    #[serde(default)]
+    pub smtp: Option<SmtpConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmtpConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub from_address: String,
+    #[serde(default)]
+    pub to_default: Option<String>,
+    #[serde(default = "default_true")]
+    pub use_tls: bool,
+}
+
+fn default_smtp_port() -> u16 {
+    587
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
