@@ -435,8 +435,12 @@ async fn handle_run(
     let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
     let _watcher = fim_engine.start_watcher(fim_tx)?;
 
-    // Cache de desduplicação (debounce) de eventos para evitar múltiplos alertas pelo mesmo evento de kernel
-    let mut recent_events_cache: std::collections::HashMap<String, std::time::Instant> =
+    // Caches de estado anterior para verificar se a permissão/proprietário REALMENTE mudaram
+    let mut known_permissions: std::collections::HashMap<std::path::PathBuf, u32> =
+        std::collections::HashMap::new();
+    let mut known_ownership: std::collections::HashMap<std::path::PathBuf, (u32, u32)> =
+        std::collections::HashMap::new();
+    let mut recent_alert_debounce: std::collections::HashMap<String, std::time::Instant> =
         std::collections::HashMap::new();
 
     // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
@@ -637,14 +641,24 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::PermissionsChanged { path, permissions, is_dir } => {
                             if !analyzer.is_package_manager_active() {
-                                let key = format!("chmod:{}:{:o}", path.display(), permissions & 0o777);
+                                let norm_perm = permissions & 0o777;
+
+                                // Verifica se a permissão realmente mudou para este path
+                                if let Some(&old_perm) = known_permissions.get(&path) {
+                                    if old_perm == norm_perm {
+                                        continue; // A permissão não mudou!
+                                    }
+                                }
+                                known_permissions.insert(path.clone(), norm_perm);
+
+                                let key = format!("chmod:{}:{:o}", path.display(), norm_perm);
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_events_cache.get(&key) {
-                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_events_cache.insert(key, now);
+                                recent_alert_debounce.insert(key, now);
 
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
@@ -667,27 +681,35 @@ async fn handle_run(
                                         target_type.to_lowercase(),
                                         path.display(),
                                         ip_origin_str,
-                                        permissions & 0o777
+                                        norm_perm
                                     ),
                                 );
                                 dispatcher.dispatch(alert).await;
                                 let _ = db.record_audit_log(
                                     "PERMISSIONS_CHANGED",
                                     &ip_origin_str,
-                                    &format!("{}: {} (mode: {:o})", target_type, path.display(), permissions & 0o777),
+                                    &format!("{}: {} (mode: {:o})", target_type, path.display(), norm_perm),
                                 );
                             }
                         }
                         crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, user_name, group_name, is_dir } => {
                             if !analyzer.is_package_manager_active() {
+                                // Verifica se o dono ou grupo realmente mudou para este path
+                                if let Some(&(old_uid, old_gid)) = known_ownership.get(&path) {
+                                    if old_uid == uid && old_gid == gid {
+                                        continue; // O dono/grupo não mudou!
+                                    }
+                                }
+                                known_ownership.insert(path.clone(), (uid, gid));
+
                                 let key = format!("chown:{}:{}:{}", path.display(), uid, gid);
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_events_cache.get(&key) {
-                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(3) {
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_events_cache.insert(key, now);
+                                recent_alert_debounce.insert(key, now);
 
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
