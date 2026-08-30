@@ -374,7 +374,7 @@ async fn handle_report(
 
         let mailer = SmtpNotifier::new(smtp_cfg);
         let subject = format!(
-            "[SAURONEYE - REPORT] Security Audit Report — {}",
+            "[SAURONEYE - REPORT] Security Audit Report - {}",
             config.general.hostname
         );
         let body = format!(

@@ -55,7 +55,7 @@ impl SmtpNotifier {
             .to_string();
 
         let content_type = ContentType::parse("application/pdf")
-            .unwrap_or(ContentType::parse("application/octet-stream").unwrap());
+            .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
         let attachment = Attachment::new(file_name).body(pdf_data, content_type);
 
         let email = Message::builder()
