@@ -57,30 +57,25 @@ Como o **SauronEye** se compara com ferramentas consagradas do mercado:
 
 ## Início Rápido
 
-### 1. Compilação a partir do Código-Fonte
-```bash
-cargo build --release
-```
-
-### 2. Inicialização Inicial (One-Time Init)
+### 1. Inicialização Inicial (One-Time Init)
 ```bash
 # Inicializa a base SQLite, cadastra a senha do admin e executa a varredura da baseline
 sauroneye --config config.toml init
 ```
 
-### 3. Execução do Daemon de Monitoramento
+### 2. Execução do Daemon de Monitoramento
 ```bash
 # Executa em primeiro plano
 sauroneye --config config.toml run
 ```
 
-### 4. Atualização Autenticada de Baseline (Pós-Manutenção)
+### 3. Atualização Autenticada de Baseline (Pós-Manutenção)
 ```bash
 # Requer confirmação da senha do administrador
 sauroneye --config config.toml update
 ```
 
-### 5. Verificação de Status
+### 4. Verificação de Status
 ```bash
 sauroneye --config config.toml status
 ```

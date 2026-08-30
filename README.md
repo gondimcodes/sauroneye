@@ -57,30 +57,25 @@ How **SauronEye** compares against established security and integrity tools:
 
 ## Quick Start
 
-### 1. Build from Source
-```bash
-cargo build --release
-```
-
-### 2. Initial Setup (One-Time Init)
+### 1. Initial Setup (One-Time Init)
 ```bash
 # Initialize database, set admin password, and record baseline scan
 sauroneye --config config.toml init
 ```
 
-### 3. Run Monitoring Daemon
+### 2. Run Monitoring Daemon
 ```bash
 # Run in foreground
 sauroneye --config config.toml run
 ```
 
-### 4. Authenticated Baseline Update (After Maintenance)
+### 3. Authenticated Baseline Update (After Maintenance)
 ```bash
 # Requires admin password verification
 sauroneye --config config.toml update
 ```
 
-### 5. Check Sentinel Status
+### 4. Check Sentinel Status
 ```bash
 sauroneye --config config.toml status
 ```
