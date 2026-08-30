@@ -346,7 +346,7 @@ async fn handle_report(
         parse_time_argument(from).map_err(|e| format!("Error in --from parameter: {}", e))?;
     let end_ts = parse_time_argument(to).map_err(|e| format!("Error in --to parameter: {}", e))?;
 
-    println!("📊 Generating Forensic Security Audit PDF Report...");
+    println!("👁️  Generating Forensic Security Audit PDF Report...");
     let logs = db.query_audit_logs(start_ts, end_ts)?;
 
     generate_pdf_report(&config.general.hostname, start_ts, end_ts, &logs, output)?;
