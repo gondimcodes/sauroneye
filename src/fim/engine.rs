@@ -325,27 +325,120 @@ impl FimEngine {
                     }
                 }
             }
-            EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
-                if event.paths.len() >= 2 {
-                    let from = &event.paths[0];
-                    let to = &event.paths[1];
-                    if !Self::check_excluded(from, active_exclusions)
-                        || !Self::check_excluded(to, active_exclusions)
-                    {
-                        if to.is_dir() {
-                            let fim_ev = FimEvent::DirectoryRenamed {
-                                from: from.clone(),
-                                to: to.clone(),
-                            };
-                            let _ = event_tx.blocking_send(fim_ev);
-                        } else if to.is_file() {
-                            if let Ok(fp) = FileFingerprint::generate(to, hash_algo) {
-                                let _ = event_tx
-                                    .blocking_send(FimEvent::Deleted { path: from.clone() });
-                                let _ = event_tx.blocking_send(FimEvent::Created {
-                                    path: to.clone(),
-                                    fingerprint: fp,
-                                });
+            EventKind::Modify(notify::event::ModifyKind::Name(rename_mode)) => {
+                use notify::event::RenameMode;
+                match rename_mode {
+                    RenameMode::Both => {
+                        if event.paths.len() >= 2 {
+                            let from = &event.paths[0];
+                            let to = &event.paths[1];
+                            if !Self::check_excluded(from, active_exclusions)
+                                || !Self::check_excluded(to, active_exclusions)
+                            {
+                                if to.is_dir() {
+                                    let _ = event_tx.blocking_send(FimEvent::DirectoryRenamed {
+                                        from: from.clone(),
+                                        to: to.clone(),
+                                    });
+                                } else if to.is_file() {
+                                    if let Ok(fp) = FileFingerprint::generate(to, hash_algo) {
+                                        let _ = event_tx.blocking_send(FimEvent::Deleted {
+                                            path: from.clone(),
+                                        });
+                                        let _ = event_tx.blocking_send(FimEvent::Created {
+                                            path: to.clone(),
+                                            fingerprint: fp,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    RenameMode::From => {
+                        // Arquivo/diretório foi movido para fora ou deletado via rename
+                        for path in event.paths {
+                            if !Self::check_excluded(&path, active_exclusions) {
+                                let _ = event_tx.blocking_send(FimEvent::Deleted { path });
+                            }
+                        }
+                    }
+                    RenameMode::To => {
+                        // Arquivo/diretório foi movido para dentro
+                        for path in event.paths {
+                            if !Self::check_excluded(&path, active_exclusions) {
+                                if path.is_dir() {
+                                    if let Ok(meta) = std::fs::metadata(&path) {
+                                        let _ =
+                                            event_tx.blocking_send(FimEvent::DirectoryCreated {
+                                                path: path.clone(),
+                                                permissions: meta.mode(),
+                                                uid: meta.uid(),
+                                                gid: meta.gid(),
+                                            });
+                                    }
+                                } else if path.is_file() {
+                                    if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
+                                        let _ = event_tx.blocking_send(FimEvent::Created {
+                                            path: path.clone(),
+                                            fingerprint: fp,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // Fallback genérico para 2 paths ou 1 path
+                        if event.paths.len() >= 2 {
+                            let from = &event.paths[0];
+                            let to = &event.paths[1];
+                            if !Self::check_excluded(from, active_exclusions)
+                                || !Self::check_excluded(to, active_exclusions)
+                            {
+                                if to.is_dir() {
+                                    let _ = event_tx.blocking_send(FimEvent::DirectoryRenamed {
+                                        from: from.clone(),
+                                        to: to.clone(),
+                                    });
+                                } else if to.is_file() {
+                                    if let Ok(fp) = FileFingerprint::generate(to, hash_algo) {
+                                        let _ = event_tx.blocking_send(FimEvent::Deleted {
+                                            path: from.clone(),
+                                        });
+                                        let _ = event_tx.blocking_send(FimEvent::Created {
+                                            path: to.clone(),
+                                            fingerprint: fp,
+                                        });
+                                    }
+                                }
+                            }
+                        } else {
+                            for path in event.paths {
+                                if !Self::check_excluded(&path, active_exclusions) {
+                                    if path.exists() {
+                                        if path.is_dir() {
+                                            if let Ok(meta) = std::fs::metadata(&path) {
+                                                let _ = event_tx.blocking_send(
+                                                    FimEvent::DirectoryCreated {
+                                                        path: path.clone(),
+                                                        permissions: meta.mode(),
+                                                        uid: meta.uid(),
+                                                        gid: meta.gid(),
+                                                    },
+                                                );
+                                            }
+                                        } else if let Ok(fp) =
+                                            FileFingerprint::generate(&path, hash_algo)
+                                        {
+                                            let _ = event_tx.blocking_send(FimEvent::Created {
+                                                path: path.clone(),
+                                                fingerprint: fp,
+                                            });
+                                        }
+                                    } else {
+                                        let _ = event_tx.blocking_send(FimEvent::Deleted { path });
+                                    }
+                                }
                             }
                         }
                     }
