@@ -8,6 +8,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub fim: FimConfig,
     #[serde(default)]
+    pub distro_exclusions: DistroExclusionsConfig,
+    #[serde(default)]
     pub package_manager: PackageManagerConfig,
     #[serde(default)]
     pub auth_monitor: AuthMonitorConfig,
@@ -44,6 +46,24 @@ pub struct FimConfig {
     pub include_paths: Vec<PathBuf>,
     #[serde(default)]
     pub exclude_paths: Vec<String>,
+    #[serde(default = "default_distro")]
+    pub distro_profile: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DistroExclusionsConfig {
+    #[serde(default)]
+    pub debian: Vec<String>,
+    #[serde(default)]
+    pub redhat: Vec<String>,
+    #[serde(default)]
+    pub alpine: Vec<String>,
+    #[serde(default)]
+    pub arch: Vec<String>,
+}
+
+fn default_distro() -> String {
+    "auto".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

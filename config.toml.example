@@ -30,12 +30,47 @@ include_paths = [
     "/root/.ssh"
 ]
 
-# Excluded patterns and transient noise paths
+# Excluded patterns and global transient noise paths
 exclude_paths = [
     "/etc/mtab",
     "/etc/resolv.conf",
     "*.swp",
     "*.tmp"
+]
+
+# Distro Profile: "auto", "debian", "redhat", "alpine", "arch" or "none"
+distro_profile = "auto"
+
+[distro_exclusions]
+# Debian / Ubuntu transient package manager files
+debian = [
+    "/var/lib/apt/lists/partial",
+    "/var/cache/apt/archives/partial",
+    ".apt-acquire-privs-test",
+    "/var/lib/dpkg/tmp.ci",
+    "/var/lib/dpkg/lock-frontend",
+    "/var/lib/dpkg/lock",
+    "/var/lib/apt/lists/lock"
+]
+
+# RedHat / Rocky Linux / AlmaLinux / Fedora transient files
+redhat = [
+    "/var/cache/dnf",
+    "/var/cache/yum",
+    "/var/lib/dnf/history",
+    "/var/lib/rpm/.rpm.lock"
+]
+
+# Alpine Linux transient files
+alpine = [
+    "/var/cache/apk",
+    "/lib/apk/db/lock"
+]
+
+# Arch Linux transient files
+arch = [
+    "/var/cache/pacman/pkg",
+    "/var/lib/pacman/db.lck"
 ]
 
 [package_manager]

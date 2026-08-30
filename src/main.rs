@@ -126,7 +126,7 @@ async fn handle_init(
     println!("✅ Admin user created and credentials hashed with Argon2id.");
 
     println!("🔍 Performing initial recursive baseline scan of configured paths...");
-    let fim_engine = FimEngine::new(config.fim.clone());
+    let fim_engine = FimEngine::new(config.fim.clone(), config.distro_exclusions.clone());
     let fingerprints = fim_engine.scan_baseline();
 
     db.save_fingerprints_batch(&fingerprints)?;
@@ -176,7 +176,7 @@ async fn handle_update(
 
     println!("🔓 Admin authentication verified.");
     println!("🔍 Rescanning directories and recalculating fingerprints...");
-    let fim_engine = FimEngine::new(config.fim.clone());
+    let fim_engine = FimEngine::new(config.fim.clone(), config.distro_exclusions.clone());
     let fingerprints = fim_engine.scan_baseline();
 
     db.save_fingerprints_batch(&fingerprints)?;
@@ -235,7 +235,7 @@ async fn handle_run(
         config.general.hostname
     );
 
-    let fim_engine = FimEngine::new(config.fim.clone());
+    let fim_engine = FimEngine::new(config.fim.clone(), config.distro_exclusions.clone());
     let analyzer = Analyzer::new(config.package_manager.check_package_db);
     let rce_detector = RceDetector::new(config.rce_detector.clone());
     let mut pam_watcher = PamWatcher::new();

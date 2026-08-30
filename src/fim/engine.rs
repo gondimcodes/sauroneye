@@ -6,7 +6,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
-use crate::config::FimConfig;
+use crate::config::{DistroExclusionsConfig, FimConfig};
 use crate::fim::hasher::HashAlgorithm;
 use crate::fim::state::FileFingerprint;
 
@@ -27,13 +27,60 @@ pub enum FimEvent {
 
 pub struct FimEngine {
     config: FimConfig,
+    distro_exclusions: DistroExclusionsConfig,
+    active_exclusions: Vec<String>,
     hash_algo: HashAlgorithm,
 }
 
 impl FimEngine {
-    pub fn new(config: FimConfig) -> Self {
+    pub fn new(config: FimConfig, distro_exclusions: DistroExclusionsConfig) -> Self {
         let hash_algo = HashAlgorithm::parse(&config.hash_algorithm);
-        Self { config, hash_algo }
+        let active_exclusions = Self::compute_active_exclusions(&config, &distro_exclusions);
+        Self {
+            config,
+            distro_exclusions,
+            active_exclusions,
+            hash_algo,
+        }
+    }
+
+    fn compute_active_exclusions(
+        config: &FimConfig,
+        distro_cfg: &DistroExclusionsConfig,
+    ) -> Vec<String> {
+        let mut exclusions = config.exclude_paths.clone();
+
+        let profile = config.distro_profile.to_lowercase();
+        let is_auto = profile == "auto";
+
+        // Detect or apply Debian/Ubuntu exclusions
+        if profile == "debian"
+            || profile == "ubuntu"
+            || (is_auto && Path::new("/etc/debian_version").exists())
+        {
+            exclusions.extend(distro_cfg.debian.clone());
+        }
+
+        // Detect or apply RedHat/Rocky/Alma/CentOS/Fedora exclusions
+        if profile == "redhat"
+            || profile == "rhel"
+            || profile == "fedora"
+            || (is_auto && Path::new("/etc/redhat-release").exists())
+        {
+            exclusions.extend(distro_cfg.redhat.clone());
+        }
+
+        // Detect or apply Alpine exclusions
+        if profile == "alpine" || (is_auto && Path::new("/etc/alpine-release").exists()) {
+            exclusions.extend(distro_cfg.alpine.clone());
+        }
+
+        // Detect or apply Arch Linux exclusions
+        if profile == "arch" || (is_auto && Path::new("/etc/arch-release").exists()) {
+            exclusions.extend(distro_cfg.arch.clone());
+        }
+
+        exclusions
     }
 
     /// Performs full recursive baseline scanning of configured paths.
@@ -103,14 +150,14 @@ impl FimEngine {
             }
         }
 
-        let config_clone = self.config.clone();
+        let active_exclusions = self.active_exclusions.clone();
         let hash_algo = self.hash_algo;
 
         std::thread::spawn(move || {
             while let Ok(res) = std_rx.recv() {
                 match res {
                     Ok(event) => {
-                        Self::handle_fs_event(event, &config_clone, hash_algo, &event_tx);
+                        Self::handle_fs_event(event, &active_exclusions, hash_algo, &event_tx);
                     }
                     Err(e) => {
                         warn!("Filesystem watcher error: {:?}", e);
@@ -124,14 +171,14 @@ impl FimEngine {
 
     fn handle_fs_event(
         event: Event,
-        config: &FimConfig,
+        active_exclusions: &[String],
         hash_algo: HashAlgorithm,
         event_tx: &tokio_mpsc::Sender<FimEvent>,
     ) {
         match event.kind {
             EventKind::Modify(_) | EventKind::Create(_) => {
                 for path in event.paths {
-                    if path.is_file() && !Self::check_excluded(&path, &config.exclude_paths) {
+                    if path.is_file() && !Self::check_excluded(&path, active_exclusions) {
                         if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
                             let fim_ev = FimEvent::Modified {
                                 path: path.clone(),
@@ -144,7 +191,7 @@ impl FimEngine {
             }
             EventKind::Remove(_) => {
                 for path in event.paths {
-                    if !Self::check_excluded(&path, &config.exclude_paths) {
+                    if !Self::check_excluded(&path, active_exclusions) {
                         let fim_ev = FimEvent::Deleted { path };
                         let _ = event_tx.blocking_send(fim_ev);
                     }
@@ -155,7 +202,7 @@ impl FimEngine {
     }
 
     pub fn is_excluded(&self, path: &Path) -> bool {
-        Self::check_excluded(path, &self.config.exclude_paths)
+        Self::check_excluded(path, &self.active_exclusions)
     }
 
     fn check_excluded(path: &Path, exclude_patterns: &[String]) -> bool {
@@ -170,16 +217,7 @@ impl FimEngine {
             return true;
         }
 
-        // 2. Ignore transient package manager downloads and privilege check temp files
-        if path_str.contains("/var/lib/apt/lists/partial")
-            || path_str.contains("/var/cache/apt/archives/partial")
-            || path_str.contains(".apt-acquire-privs-test")
-            || path_str.contains("/var/lib/dpkg/tmp.ci")
-        {
-            return true;
-        }
-
-        // 3. Custom user exclusions
+        // 2. Custom user and distro exclusions
         for pattern in exclude_patterns {
             if pattern.starts_with('*') {
                 let ext = &pattern[1..];
