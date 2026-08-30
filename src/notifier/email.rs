@@ -54,8 +54,9 @@ impl SmtpNotifier {
             .to_string_lossy()
             .to_string();
 
-        let attachment =
-            Attachment::new(file_name).body(pdf_data, ContentType::parse("application/pdf")?);
+        let content_type = ContentType::parse("application/pdf")
+            .unwrap_or_else(|_| ContentType::parse("application/octet-stream").unwrap());
+        let attachment = Attachment::new(file_name).body(pdf_data, content_type);
 
         let email = Message::builder()
             .from(self.config.from_address.parse()?)
@@ -63,7 +64,11 @@ impl SmtpNotifier {
             .subject(subject)
             .multipart(
                 MultiPart::mixed()
-                    .singlepart(SinglePart::plain(body_text.to_string()))
+                    .singlepart(
+                        SinglePart::builder()
+                            .header(ContentType::TEXT_PLAIN)
+                            .body(body_text.to_string()),
+                    )
                     .singlepart(attachment),
             )?;
 
