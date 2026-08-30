@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::error::Error;
 use std::path::Path;
@@ -24,13 +25,25 @@ impl SmtpNotifier {
     ) -> Result<AsyncSmtpTransport<Tokio1Executor>, Box<dyn Error + Send + Sync>> {
         let creds = Credentials::new(self.config.username.clone(), self.config.password.clone());
 
-        let transport = if self.config.use_tls {
-            AsyncSmtpTransport::<Tokio1Executor>::relay(&self.config.host)?
+        if !self.config.use_tls {
+            let transport =
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
+                    .port(self.config.port)
+                    .credentials(creds)
+                    .build();
+            return Ok(transport);
+        }
+
+        // Port 465 uses direct SMTPS (TLS wrapper), while 587/25 use STARTTLS
+        let transport = if self.config.port == 465 {
+            let tls_params = TlsParameters::builder(self.config.host.clone()).build_rustls()?;
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
                 .port(self.config.port)
+                .tls(Tls::Wrapper(tls_params))
                 .credentials(creds)
                 .build()
         } else {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.config.host)?
                 .port(self.config.port)
                 .credentials(creds)
                 .build()
@@ -54,8 +67,9 @@ impl SmtpNotifier {
             .to_string_lossy()
             .to_string();
 
-        let attachment = Attachment::new(file_name)
-            .body(pdf_data, ContentType::parse("application/pdf").unwrap());
+        let content_type =
+            ContentType::parse("application/pdf").unwrap_or_else(|_| ContentType::TEXT_PLAIN);
+        let attachment = Attachment::new(file_name).body(pdf_data, content_type);
 
         let email = Message::builder()
             .from(self.config.from_address.parse()?)
@@ -86,7 +100,6 @@ impl Notifier for SmtpNotifier {
             _ => return Ok(()),
         };
 
-        // Format clean subject and body without raw multi-byte emojis that trigger InvalidContentType on some SMTP servers
         let clean_subject = format!(
             "[SAURONEYE - {}] {}",
             alert.severity.as_str(),
