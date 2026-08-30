@@ -12,17 +12,35 @@ This guide covers building, configuring, and installing **SauronEye** as a syste
 
 - **Linux Kernel:** 5.4 or newer (supports `fanotify`, `/proc` connectors, and Netlink interfaces).
 - **Rust Toolchain:** Rust 1.75+ (`rustc` and `cargo`).
-- **Build Utilities:** `build-essential`, `pkg-config`, `libssl-dev` (or distro equivalents).
+- **Build Utilities:** `build-essential`, `pkg-config`, `libssl-dev`, `curl` (or distro equivalents).
+
+### 1. Install System Dependencies
 
 ```bash
 # Debian / Ubuntu
-sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev
+sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev curl
 
 # RHEL / Rocky Linux / AlmaLinux
-sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y pkgconfig openssl-devel
+sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y pkgconfig openssl-devel curl
 
 # Alpine Linux
-apk add build-base pkgconfig openssl-dev
+apk add build-base pkgconfig openssl-dev curl
+```
+
+### 2. Install Rust Toolchain (via `rustup`)
+
+If you don't have Rust installed, install the official stable toolchain:
+
+```bash
+# Install rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Load Rust environment into current shell
+source "$HOME/.cargo/env"
+
+# Verify installation
+rustc --version
+cargo --version
 ```
 
 ---

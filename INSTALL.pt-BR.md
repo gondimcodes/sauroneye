@@ -12,17 +12,35 @@ Este guia detalha o processo de compilação, configuração e implantação do 
 
 - **Kernel Linux:** Versão 5.4 ou superior (com suporte a `fanotify`, conectores `/proc` e interfaces Netlink).
 - **Toolchain Rust:** Rust 1.75+ (`rustc` e `cargo`).
-- **Bibliotecas de Compilação:** `build-essential`, `pkg-config`, `libssl-dev` (ou equivalentes da distribuição).
+- **Bibliotecas de Compilação:** `build-essential`, `pkg-config`, `libssl-dev`, `curl` (ou equivalentes da distribuição).
+
+### 1. Instalação das Dependências do Sistema
 
 ```bash
 # Debian / Ubuntu
-sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev
+sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev curl
 
 # RHEL / Rocky Linux / AlmaLinux
-sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y pkgconfig openssl-devel
+sudo dnf groupinstall -y "Development Tools" && sudo dnf install -y pkgconfig openssl-devel curl
 
 # Alpine Linux
-apk add build-base pkgconfig openssl-dev
+apk add build-base pkgconfig openssl-dev curl
+```
+
+### 2. Instalação do Rust Toolchain (via `rustup`)
+
+Se o Rust ainda não estiver instalado no servidor, instale a toolchain estável oficial:
+
+```bash
+# Instalação automatizada do rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Carregar o ambiente do Rust na sessão atual do shell
+source "$HOME/.cargo/env"
+
+# Verificar instalação
+rustc --version
+cargo --version
 ```
 
 ---
