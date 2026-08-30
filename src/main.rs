@@ -631,6 +631,75 @@ async fn handle_run(
                                 );
                             }
                         }
+                        crate::fim::engine::FimEvent::PermissionsChanged { path, permissions, is_dir } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let target_type = if is_dir { "Directory" } else { "File" };
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    &format!("PROTECTED {} PERMISSIONS MODIFIED (CHMOD)", target_type.to_uppercase()),
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "Permissions changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Permissions: {:o}",
+                                        target_type.to_lowercase(),
+                                        path.display(),
+                                        ip_origin_str,
+                                        permissions & 0o777
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "PERMISSIONS_CHANGED",
+                                    &ip_origin_str,
+                                    &format!("{}: {} (mode: {:o})", target_type, path.display(), permissions & 0o777),
+                                );
+                            }
+                        }
+                        crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, is_dir } => {
+                            if !analyzer.is_package_manager_active() {
+                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
+                                let ip_origin_str = if !active_sessions.is_empty() {
+                                    active_sessions
+                                        .iter()
+                                        .map(|s| s.ip_origin.clone())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                } else {
+                                    "local console / service".to_string()
+                                };
+
+                                let target_type = if is_dir { "Directory" } else { "File" };
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    &format!("PROTECTED {} OWNERSHIP MODIFIED (CHOWN)", target_type.to_uppercase()),
+                                    AlertSeverity::Warning,
+                                    &format!(
+                                        "Ownership changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Owner UID/GID: {}/{}",
+                                        target_type.to_lowercase(),
+                                        path.display(),
+                                        ip_origin_str,
+                                        uid,
+                                        gid
+                                    ),
+                                );
+                                dispatcher.dispatch(alert).await;
+                                let _ = db.record_audit_log(
+                                    "OWNERSHIP_CHANGED",
+                                    &ip_origin_str,
+                                    &format!("{}: {} (uid: {}, gid: {})", target_type, path.display(), uid, gid),
+                                );
+                            }
+                        }
                         crate::fim::engine::FimEvent::MetadataChanged { path, permissions, uid, gid, is_dir } => {
                             if !analyzer.is_package_manager_active() {
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
@@ -647,10 +716,10 @@ async fn handle_run(
                                 let target_type = if is_dir { "Directory" } else { "File" };
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
-                                    &format!("PROTECTED {} PERMISSIONS/OWNER MODIFIED", target_type.to_uppercase()),
+                                    &format!("PROTECTED {} METADATA MODIFIED", target_type.to_uppercase()),
                                     AlertSeverity::Warning,
                                     &format!(
-                                        "Permissions or ownership changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nNew Permissions: {:o}\nNew Owner UID/GID: {}/{}",
+                                        "Metadata changed on protected {}:\n\nPath: {}\nActive User Origin IP(s): {}\nPermissions: {:o}\nOwner UID/GID: {}/{}",
                                         target_type.to_lowercase(),
                                         path.display(),
                                         ip_origin_str,
