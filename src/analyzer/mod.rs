@@ -26,6 +26,10 @@ impl Analyzer {
         }
     }
 
+    pub fn is_package_manager_active(&self) -> bool {
+        self.pkg_checker.is_package_manager_locked()
+    }
+
     pub fn analyze_modification(
         &self,
         path: &Path,

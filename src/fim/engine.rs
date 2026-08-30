@@ -170,7 +170,16 @@ impl FimEngine {
             return true;
         }
 
-        // 2. Custom user exclusions
+        // 2. Ignore transient package manager downloads and privilege check temp files
+        if path_str.contains("/var/lib/apt/lists/partial")
+            || path_str.contains("/var/cache/apt/archives/partial")
+            || path_str.contains(".apt-acquire-privs-test")
+            || path_str.contains("/var/lib/dpkg/tmp.ci")
+        {
+            return true;
+        }
+
+        // 3. Custom user exclusions
         for pattern in exclude_patterns {
             if pattern.starts_with('*') {
                 let ext = &pattern[1..];

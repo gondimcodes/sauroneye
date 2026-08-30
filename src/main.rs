@@ -312,23 +312,27 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::Created { path, fingerprint } => {
-                            let alert = AlertMessage::new(
-                                &config.general.hostname,
-                                "NEW FILE CREATED IN PROTECTED PATH",
-                                AlertSeverity::Warning,
-                                &format!("New file detected: {}\nHash: {}", path.display(), fingerprint.hash_value),
-                            );
-                            dispatcher.dispatch(alert).await;
+                            if !analyzer.is_package_manager_active() {
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "NEW FILE CREATED IN PROTECTED PATH",
+                                    AlertSeverity::Warning,
+                                    &format!("New file detected: {}\nHash: {}", path.display(), fingerprint.hash_value),
+                                );
+                                dispatcher.dispatch(alert).await;
+                            }
                             let _ = db.save_fingerprints_batch(&[fingerprint]);
                         }
                         crate::fim::engine::FimEvent::Deleted { path } => {
-                            let alert = AlertMessage::new(
-                                &config.general.hostname,
-                                "PROTECTED FILE DELETED",
-                                AlertSeverity::Critical,
-                                &format!("File was removed: {}", path.display()),
-                            );
-                            dispatcher.dispatch(alert).await;
+                            if !analyzer.is_package_manager_active() {
+                                let alert = AlertMessage::new(
+                                    &config.general.hostname,
+                                    "PROTECTED FILE DELETED",
+                                    AlertSeverity::Critical,
+                                    &format!("File was removed: {}", path.display()),
+                                );
+                                dispatcher.dispatch(alert).await;
+                            }
                         }
                     }
                 }
