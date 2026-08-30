@@ -72,6 +72,8 @@ pub struct PackageManagerConfig {
     pub auto_detect: bool,
     #[serde(default = "default_true")]
     pub check_package_db: bool,
+    #[serde(default = "default_false")]
+    pub notify_legitimate_updates: bool,
 }
 
 impl Default for PackageManagerConfig {
@@ -79,6 +81,7 @@ impl Default for PackageManagerConfig {
         Self {
             auto_detect: true,
             check_package_db: true,
+            notify_legitimate_updates: false,
         }
     }
 }
@@ -178,6 +181,10 @@ fn default_poll_interval() -> u64 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_batch_flush_interval() -> u64 {

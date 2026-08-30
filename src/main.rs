@@ -301,13 +301,17 @@ async fn handle_run(
 
                             if is_different {
                                 let analysis = analyzer.analyze_modification(&path, None, old_fp.as_ref(), &new_fingerprint);
-                                let alert = AlertMessage::new(
-                                    &config.general.hostname,
-                                    &analysis.title,
-                                    analysis.severity,
-                                    &analysis.details,
-                                );
-                                dispatcher.dispatch(alert).await;
+
+                                // Send alert only if it is tampering OR if user explicitly enabled notifications for legitimate package updates
+                                if !analysis.is_legitimate_update || config.package_manager.notify_legitimate_updates {
+                                    let alert = AlertMessage::new(
+                                        &config.general.hostname,
+                                        &analysis.title,
+                                        analysis.severity,
+                                        &analysis.details,
+                                    );
+                                    dispatcher.dispatch(alert).await;
+                                }
                                 let _ = db.save_fingerprints_batch(&[new_fingerprint]);
                             }
                         }
