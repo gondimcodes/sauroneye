@@ -1,4 +1,4 @@
-# SauronEye 👁️
+# SauronEye 👁️ [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-00457C?style=flat&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?business=7LD8SPXNF2KH2&no_recurring=0&item_name=Sua+contribui%C3%A7%C3%A3o+ajuda+a+manter+meu+estoque+de+caf%C3%A9+em+dia+%3A%29&currency_code=BRL)
 
 [![Rust](https://img.shields.io/badge/linguagem-Rust-orange.svg)](https://www.rust-lang.org/)
 [![Licença](https://img.shields.io/badge/licença-MIT%20OU%20Apache--2.0-blue.svg)](LICENSE)
