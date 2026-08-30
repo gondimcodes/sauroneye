@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use walkdir::WalkDir;
 
 use crate::config::FimConfig;

@@ -2,7 +2,6 @@ use rusqlite::{params, Connection};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
 
 use crate::db::schema::SCHEMA_SQL;
 use crate::db::user::AdminAuth;

@@ -1,6 +1,5 @@
 use crate::auth::pam_watcher::AuthEvent;
 use std::error::Error;
-use tracing::{info, warn};
 
 pub struct AuditNetlink;
 

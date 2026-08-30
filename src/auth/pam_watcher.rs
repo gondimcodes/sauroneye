@@ -1,8 +1,6 @@
-use crate::notifier::{AlertMessage, AlertSeverity};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
-use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct AuthEvent {

@@ -1,3 +1,3 @@
 pub mod process_tree;
 
-pub use process_tree::{RceAlert, RceDetector};
+pub use process_tree::RceDetector;

@@ -2,7 +2,6 @@ use crate::analyzer::process_context::ProcessInspector;
 use crate::config::RceDetectorConfig;
 use std::collections::HashSet;
 use std::fs;
-use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
 pub struct RceAlert {

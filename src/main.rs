@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod analyzer;
 mod auth;
 mod cli;
@@ -8,11 +10,11 @@ mod notifier;
 mod rce_detect;
 
 use clap::{Parser, Subcommand};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::analyzer::Analyzer;
 use crate::auth::pam_watcher::PamWatcher;
@@ -233,8 +235,8 @@ async fn handle_run(
         config.general.hostname
     );
 
-    let fim_engine = FimEngine::new(config.fim.clone());
-    let analyzer = Analyzer::new(config.package_manager.check_package_db);
+    let _fim_engine = FimEngine::new(config.fim.clone());
+    let _analyzer = Analyzer::new(config.package_manager.check_package_db);
     let rce_detector = RceDetector::new(config.rce_detector.clone());
     let mut pam_watcher = PamWatcher::new();
 
