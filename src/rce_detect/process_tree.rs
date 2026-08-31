@@ -14,6 +14,7 @@ pub struct RceAlert {
 pub struct RceDetector {
     config: RceDetectorConfig,
     protected_services: HashSet<String>,
+    alerted_pids: std::sync::Mutex<HashSet<u32>>,
 }
 
 impl RceDetector {
@@ -22,6 +23,7 @@ impl RceDetector {
         Self {
             config,
             protected_services,
+            alerted_pids: std::sync::Mutex::new(HashSet::new()),
         }
     }
 
@@ -34,11 +36,21 @@ impl RceDetector {
             Err(_) => return alerts,
         };
 
+        let mut active_pids = HashSet::new();
+
         for entry in proc_dir.filter_map(|e| e.ok()) {
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
 
             if let Ok(pid) = name_str.parse::<u32>() {
+                active_pids.insert(pid);
+
+                // Evita re-alertar sobre o mesmo PID enquanto ele continuar em execução (ex: sleep longo)
+                if let Ok(alerted) = self.alerted_pids.lock() {
+                    if alerted.contains(&pid) {
+                        continue;
+                    }
+                }
                 if let Some(ppid) = ProcessInspector::get_parent_pid(pid) {
                     let parent_comm = ProcessInspector::get_process_name(ppid);
                     let parent_exe = ProcessInspector::get_process_exe(ppid);
@@ -80,10 +92,19 @@ impl RceDetector {
                                 child_cmd,
                                 child_pid: pid,
                             });
+
+                            if let Ok(mut alerted) = self.alerted_pids.lock() {
+                                alerted.insert(pid);
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // Limpa PIDs terminados para liberar memória
+        if let Ok(mut alerted) = self.alerted_pids.lock() {
+            alerted.retain(|p| active_pids.contains(p));
         }
 
         alerts
