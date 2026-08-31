@@ -76,8 +76,7 @@ impl SmtpNotifier {
             .to_string_lossy()
             .to_string();
 
-        let content_type =
-            ContentType::parse("application/pdf").unwrap_or(ContentType::TEXT_PLAIN);
+        let content_type = ContentType::parse("application/pdf").unwrap_or(ContentType::TEXT_PLAIN);
         let attachment = Attachment::new(file_name).body(pdf_data, content_type);
 
         let email = Message::builder()

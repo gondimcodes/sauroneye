@@ -86,8 +86,9 @@ impl RceDetector {
 
                             let parent_name = parent_comm
                                 .or_else(|| {
-                                    parent_exe
-                                        .and_then(|p| p.split('/').next_back().map(|s| s.to_string()))
+                                    parent_exe.and_then(|p| {
+                                        p.split('/').next_back().map(|s| s.to_string())
+                                    })
                                 })
                                 .unwrap_or_else(|| format!("PID:{}", ppid));
 
