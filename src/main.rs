@@ -250,10 +250,18 @@ async fn handle_update(
     let fim_engine = FimEngine::new(config.fim.clone(), config.distro_exclusions.clone());
     let fingerprints = fim_engine.scan_baseline();
 
+    let actor = if let Some(session) =
+        crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips().first()
+    {
+        format!("admin:{}", session.ip_origin)
+    } else {
+        "admin:local".to_string()
+    };
+
     db.save_fingerprints_batch(&fingerprints)?;
     db.record_audit_log(
         "UPDATE_BASELINE",
-        "admin",
+        &actor,
         &format!("Baseline updated: {} files", fingerprints.len()),
     )?;
 
@@ -262,7 +270,8 @@ async fn handle_update(
         "Baseline Updated Successfully",
         AlertSeverity::Info,
         &format!(
-            "Baseline recalculation executed by admin. Total files: {}",
+            "Operator: {}\nBaseline recalculation executed by admin.\nTotal indexed files: {}",
+            actor,
             fingerprints.len()
         ),
     );
@@ -286,10 +295,18 @@ async fn handle_passwd(
     let new_password = AuthPrompt::prompt_new_password()?;
     let new_password_hash = AdminAuth::hash_password(&new_password)?;
 
+    let actor = if let Some(session) =
+        crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips().first()
+    {
+        format!("admin:{}", session.ip_origin)
+    } else {
+        "admin:local".to_string()
+    };
+
     db.update_admin_password(&new_password_hash)?;
     db.record_audit_log(
         "CHANGE_PASSWORD",
-        "admin",
+        &actor,
         "Admin password changed successfully",
     )?;
 
@@ -297,13 +314,15 @@ async fn handle_passwd(
         &config.general.hostname,
         "Admin Password Changed",
         AlertSeverity::Warning,
-        "The SauronEye administrator password was successfully changed via CLI.",
+        &format!(
+            "Operator: {}\nThe SauronEye administrator password was successfully changed via CLI.",
+            actor
+        ),
     );
     dispatcher.dispatch(alert).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
     println!("✅ Admin password successfully updated with Argon2id encryption!");
-
     Ok(())
 }
 
@@ -353,13 +372,21 @@ async fn handle_logs(
 
     if purge {
         let count = db.purge_audit_logs(start_ts, end_ts)?;
+        let actor = if let Some(session) =
+            crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips().first()
+        {
+            format!("admin:{}", session.ip_origin)
+        } else {
+            "admin:local".to_string()
+        };
+
         println!(
             "🗑️  Purge complete: {} audit log entries permanently removed from database.",
             count
         );
         db.record_audit_log(
             "PURGE_LOGS",
-            "admin",
+            &actor,
             &format!("Purged {} log records between {} and {}", count, from, to),
         )?;
 
@@ -368,8 +395,8 @@ async fn handle_logs(
             "Forensic Audit Logs Purged",
             AlertSeverity::Warning,
             &format!(
-                "An administrator purged {} audit log entries from the database.\nInterval: {} to {}",
-                count, from, to
+                "Operator: {}\nAn administrator purged {} audit log entries from the database.\nInterval: {} to {}",
+                actor, count, from, to
             ),
         );
         dispatcher.dispatch(alert).await;
@@ -379,6 +406,7 @@ async fn handle_logs(
     }
 
     let raw_logs = db.query_audit_logs(start_ts, end_ts)?;
+
     let logs: Vec<AuditLogEntry> = if !config.package_manager.notify_legitimate_updates {
         raw_logs
             .into_iter()
