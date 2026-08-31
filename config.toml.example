@@ -42,7 +42,7 @@ exclude_paths = [
     "*.swx",
     "*.swo",
     "*~",
-    "4913",              # Vim atomic inode check file (Vim source file.c: #define BVAL 4913)
+    "4913*",             # Vim atomic inode check files (starts at 4913, increments up to 4913+10000)
     "*.tmp",
     ".goutputstream-*"
 ]

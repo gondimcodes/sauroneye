@@ -486,12 +486,27 @@ impl FimEngine {
 
         // 2. Custom user and distro exclusions
         for pattern in exclude_patterns {
-            if pattern.starts_with('*') {
+            if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 2 {
+                let substr = &pattern[1..pattern.len() - 1];
+                if path_str.contains(substr) {
+                    return true;
+                }
+            } else if pattern.starts_with('*') {
                 let ext = &pattern[1..];
                 if path_str.ends_with(ext) {
                     return true;
                 }
-            } else if path_str.contains(pattern) {
+            } else if pattern.ends_with('*') {
+                let prefix = &pattern[..pattern.len() - 1];
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    if file_name.starts_with(prefix) {
+                        return true;
+                    }
+                }
+                if path_str.ends_with(prefix) || path_str.contains(prefix) {
+                    return true;
+                }
+            } else if path_str.ends_with(pattern) || path_str.contains(pattern) {
                 return true;
             }
         }
