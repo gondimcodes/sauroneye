@@ -198,7 +198,18 @@ pub struct WhatsappConfig {
 pub struct MsTeamsConfig {
     #[serde(default)]
     pub enabled: bool,
-    pub webhook_url: String,
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub tenant_id: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub team_id: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
 }

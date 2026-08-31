@@ -120,12 +120,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if let Some(ref teams) = config.notifications.msteams {
         if teams.enabled {
-            info!("Microsoft Teams notifier initialized (webhook configured)");
+            if teams.client_id.is_some() && teams.team_id.is_some() {
+                info!(
+                    "Microsoft Teams notifier initialized (OAuth 2.0 / Microsoft Graph API mode)"
+                );
+            } else {
+                info!("Microsoft Teams notifier initialized (Webhook mode)");
+            }
             dispatcher.add_notifier(Arc::new(MsTeamsNotifier::new(teams.clone())));
         } else {
             info!("Microsoft Teams notifier is disabled in configuration.");
         }
     }
+
     if let Some(ref discord) = config.notifications.discord {
         if discord.enabled {
             info!("Discord notifier initialized (webhook configured)");

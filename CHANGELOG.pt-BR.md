@@ -10,8 +10,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [1.0.6] - Em Andamento
 
 ### Adicionado
-- **Notificador de Webhook para Microsoft Teams**: Implementada integração nativa de alertas para o Microsoft Teams via Incoming Webhooks com Adaptive Cards v1.4 ricos, destaques visuais por severidade, conjuntos de fatos e Circuit Breaker anti-flood dedicado (limite de 20 alertas/minuto).
+- **Notificador de Microsoft Teams via OAuth 2.0 e Microsoft Graph API**: Implementada integração nativa para envio de alertas no Microsoft Teams via Microsoft Graph API com autenticação Azure Entra ID (OAuth 2.0 Client Credentials Grant), cache de token JWT em memória, formatação HTML com badges de severidade, suporte a fallback para Incoming Webhooks com Adaptive Cards v1.4 e Circuit Breaker anti-flood dedicado (limite de 20 alertas/minuto).
 - **Notificador de Webhook para Discord**: Implementada integração nativa de alertas para o Discord via Incoming Webhooks com Rich Embeds estilizados (cores por severidade: Crítico vermelho, Atenção laranja, Info azul), suporte a customização de nome/avatar do bot e Circuit Breaker anti-flood dedicado (limite de 30 alertas/minuto).
+
 
 ---
 

@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::config::MsTeamsConfig;
@@ -14,6 +15,25 @@ pub struct MsTeamsNotifier {
     sender: Option<mpsc::Sender<AlertMessage>>,
 }
 
+#[derive(Deserialize)]
+struct AzureOAuthTokenResponse {
+    access_token: String,
+    expires_in: u64,
+}
+
+#[derive(Serialize)]
+struct GraphMessageBody<'a> {
+    body: GraphItemBody<'a>,
+}
+
+#[derive(Serialize)]
+struct GraphItemBody<'a> {
+    #[serde(rename = "contentType")]
+    content_type: &'a str,
+    content: String,
+}
+
+// Adaptive Cards structures for Webhook mode (if configured)
 #[derive(Serialize)]
 struct AdaptiveCardEnvelope<'a> {
     #[serde(rename = "type")]
@@ -59,6 +79,11 @@ struct AdaptiveCardFact<'a> {
     value: &'a str,
 }
 
+struct TokenCache {
+    token: String,
+    expires_at: Instant,
+}
+
 impl MsTeamsNotifier {
     pub fn new(config: MsTeamsConfig) -> Self {
         if !config.enabled {
@@ -77,7 +102,9 @@ impl MsTeamsNotifier {
                 .build()
                 .unwrap_or_default();
 
-            // Cadence to respect MS Teams incoming webhook rate limit (~4 req/sec per webhook)
+            let token_cache: Arc<RwLock<Option<TokenCache>>> = Arc::new(RwLock::new(None));
+
+            // Cadence to respect MS Teams incoming limits
             let min_interval = Duration::from_millis(800);
 
             // Circuit Breaker: max 20 alerts per 60s
@@ -122,7 +149,7 @@ impl MsTeamsNotifier {
                             true,
                         );
 
-                        Self::dispatch_card(&client, &config, &warning_msg).await;
+                        Self::dispatch_message(&client, &config, &token_cache, &warning_msg).await;
                     }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
@@ -146,14 +173,14 @@ impl MsTeamsNotifier {
                             ),
                             true,
                         );
-                        Self::dispatch_card(&client, &config, &recovery_msg).await;
+                        Self::dispatch_message(&client, &config, &token_cache, &recovery_msg).await;
                         suppressed_count = 0;
                     }
                 }
 
                 recent_timestamps.push_back(Instant::now());
 
-                Self::dispatch_card(&client, &config, &alert).await;
+                Self::dispatch_message(&client, &config, &token_cache, &alert).await;
 
                 tokio::time::sleep(min_interval).await;
             }
@@ -165,7 +192,190 @@ impl MsTeamsNotifier {
         }
     }
 
-    async fn dispatch_card(client: &Client, config: &MsTeamsConfig, alert: &AlertMessage) {
+    async fn get_access_token(
+        client: &Client,
+        config: &MsTeamsConfig,
+        token_cache: &Arc<RwLock<Option<TokenCache>>>,
+    ) -> Option<String> {
+        let (tenant_id, client_id, client_secret) =
+            match (&config.tenant_id, &config.client_id, &config.client_secret) {
+                (Some(t), Some(c), Some(s)) if !t.is_empty() && !c.is_empty() && !s.is_empty() => {
+                    (t, c, s)
+                }
+                _ => return None,
+            };
+
+        // Check cached token
+        {
+            let cache = token_cache.read().await;
+            if let Some(ref tc) = *cache {
+                if tc.expires_at > Instant::now() + Duration::from_secs(60) {
+                    return Some(tc.token.clone());
+                }
+            }
+        }
+
+        // Request new OAuth 2.0 access token
+        let token_url = format!(
+            "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
+            tenant_id
+        );
+
+        let params = [
+            ("grant_type", "client_credentials"),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("scope", "https://graph.microsoft.com/.default"),
+        ];
+
+        match client.post(&token_url).form(&params).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    if let Ok(token_data) = resp.json::<AzureOAuthTokenResponse>().await {
+                        let token = token_data.access_token;
+                        let expires_at =
+                            Instant::now() + Duration::from_secs(token_data.expires_in.max(60));
+                        let mut cache = token_cache.write().await;
+                        *cache = Some(TokenCache {
+                            token: token.clone(),
+                            expires_at,
+                        });
+                        return Some(token);
+                    }
+                } else {
+                    let err_body = resp.text().await.unwrap_or_default();
+                    error!("Azure Entra ID OAuth token error: {}", err_body);
+                }
+            }
+            Err(e) => {
+                error!("Failed to request Azure OAuth token: {}", e);
+            }
+        }
+
+        None
+    }
+
+    async fn dispatch_message(
+        client: &Client,
+        config: &MsTeamsConfig,
+        token_cache: &Arc<RwLock<Option<TokenCache>>>,
+        alert: &AlertMessage,
+    ) {
+        // Mode 1: Microsoft Graph API (OAuth 2.0 Client Credentials)
+        if let (Some(team_id), Some(channel_id)) = (&config.team_id, &config.channel_id) {
+            if !team_id.is_empty() && !channel_id.is_empty() {
+                Self::dispatch_graph(client, config, token_cache, team_id, channel_id, alert).await;
+                return;
+            }
+        }
+
+        // Mode 2: Incoming Webhook (Fallback if webhook_url is configured)
+        if let Some(ref webhook_url) = config.webhook_url {
+            if !webhook_url.is_empty() {
+                Self::dispatch_webhook(client, webhook_url, alert).await;
+                return;
+            }
+        }
+
+        error!("MS Teams notifier enabled, but neither (tenant_id/client_id/client_secret/team_id/channel_id) nor webhook_url is properly configured.");
+    }
+
+    async fn dispatch_graph(
+        client: &Client,
+        config: &MsTeamsConfig,
+        token_cache: &Arc<RwLock<Option<TokenCache>>>,
+        team_id: &str,
+        channel_id: &str,
+        alert: &AlertMessage,
+    ) {
+        let token = match Self::get_access_token(client, config, token_cache).await {
+            Some(t) => t,
+            None => {
+                error!("Cannot dispatch MS Teams alert: Failed to acquire OAuth2 access token.");
+                return;
+            }
+        };
+
+        let graph_url = format!(
+            "https://graph.microsoft.com/v1.0/teams/{}/channels/{}/messages",
+            team_id, channel_id
+        );
+
+        let (color_hex, title_prefix) = match alert.severity {
+            AlertSeverity::Critical => ("#DC2626", "🚨 [SAURONEYE - CRITICAL]"),
+            AlertSeverity::Warning => ("#F59E0B", "⚠️ [SAURONEYE - WARNING]"),
+            AlertSeverity::Info => ("#2563EB", "ℹ️ [SAURONEYE - INFO]"),
+        };
+
+        let html_content = format!(
+            "<div style='border-left: 4px solid {}; padding-left: 10px; font-family: Segoe UI, sans-serif;'>\
+            <h3 style='margin: 0 0 8px 0; color: {};'>{} {}</h3>\
+            <table style='margin-bottom: 8px;'>\
+                <tr><td><b>Host:</b></td><td>{}</td></tr>\
+                <tr><td><b>Timestamp (UTC):</b></td><td>{}</td></tr>\
+            </table>\
+            <pre style='background: #f4f4f4; padding: 8px; border-radius: 4px; font-family: monospace;'>{}</pre>\
+            </div>",
+            color_hex,
+            color_hex,
+            title_prefix,
+            html_escape(&alert.title),
+            html_escape(&alert.host),
+            html_escape(&alert.timestamp),
+            html_escape(&alert.details),
+        );
+
+        let payload = GraphMessageBody {
+            body: GraphItemBody {
+                content_type: "html",
+                content: html_content,
+            },
+        };
+
+        let mut attempts = 0;
+        let max_attempts = 3;
+
+        while attempts < max_attempts {
+            attempts += 1;
+            match client
+                .post(&graph_url)
+                .bearer_auth(&token)
+                .json(&payload)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        info!(
+                            "MS Teams (Graph API) alert dispatched successfully: {}",
+                            alert.title
+                        );
+                        break;
+                    } else if status.as_u16() == 429 {
+                        warn!(
+                            "MS Teams Graph rate limit hit (429). Backing off for 10s (attempt {}/{})",
+                            attempts, max_attempts
+                        );
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                    } else {
+                        let body = response.text().await.unwrap_or_default();
+                        error!("MS Teams Graph API error (status {}): {}", status, body);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "MS Teams Graph network error (attempt {}/{}): {}",
+                        attempts, max_attempts, e
+                    );
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+
+    async fn dispatch_webhook(client: &Client, webhook_url: &str, alert: &AlertMessage) {
         let (color, title_prefix) = match alert.severity {
             AlertSeverity::Critical => ("Attention", "🚨 [SAURONEYE - CRITICAL]"),
             AlertSeverity::Warning => ("Warning", "⚠️ [SAURONEYE - WARNING]"),
@@ -219,7 +429,7 @@ impl MsTeamsNotifier {
 
         while attempts < max_attempts {
             attempts += 1;
-            match client.post(&config.webhook_url).json(&payload).send().await {
+            match client.post(webhook_url).json(&payload).send().await {
                 Ok(response) => {
                     let status = response.status();
                     if status.is_success() {
@@ -247,6 +457,15 @@ impl MsTeamsNotifier {
             }
         }
     }
+}
+
+fn html_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 #[async_trait]
