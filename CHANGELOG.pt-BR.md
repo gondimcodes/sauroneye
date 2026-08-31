@@ -7,7 +7,16 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.5] - 2026-08-31
+
+### Adicionado
+- **Fila Assíncrona com Rate Limiting para Telegram e WhatsApp**: Implementado sistema de filas MPSC em background com controle de vazão (intervalo de 1,05s para Telegram e 1,2s para WhatsApp) e retry com backoff automático em respostas HTTP 429 (`retry_after`), eliminando erros de limite de requisições durante tempestades de eventos.
+- **Supressão de Ruído no PAM**: Filtradas mensagens internas de abertura de sessão do `systemd-user:session`, evitando notificações de login redundantes e ruídos na trilha de auditoria.
+
+---
+
 ## [1.0.4] - 2026-08-31
+
 
 ### Adicionado
 - **Decodificação Completa de Sockets IPv6 (`/proc/net/tcp6`)**: Implementado algoritmo de decodificação de 128 bits para tabelas de sockets Linux `/proc/net/tcp6` convertendo para `std::net::Ipv6Addr`, garantindo rastreabilidade forense precisa de IPs remotos em conexões SSH e de rede via IPv6.

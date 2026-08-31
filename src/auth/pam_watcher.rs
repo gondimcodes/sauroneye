@@ -70,9 +70,12 @@ impl PamWatcher {
     fn parse_auth_line(line: &str) -> Option<AuthEvent> {
         let lower = line.to_lowercase();
 
-        // Avoid duplicate SSH alerts: sshd already logs "Accepted publickey/password" with real origin IP,
-        // so ignore the redundant "pam_unix(sshd:session): session opened" event
-        if lower.contains("sshd") && lower.contains("session opened for user") {
+        // Avoid duplicate/noisy alerts:
+        // 1. sshd already logs "Accepted publickey/password" with real origin IP, so ignore the redundant "pam_unix(sshd:session): session opened"
+        // 2. systemd-user opens an internal slice for the user upon login; ignore "pam_unix(systemd-user:session): session opened"
+        if lower.contains("systemd-user:session")
+            || (lower.contains("sshd") && lower.contains("session opened for user"))
+        {
             return None;
         }
 
@@ -130,5 +133,37 @@ impl PamWatcher {
             });
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sshd_accepted_publickey() {
+        let line = "2026-08-31T12:48:18.053372-03:00 AMA-COCKPIT-01 sshd-session[2605282]: Accepted publickey for root from 10.0.8.2 port 9906 ssh2: ED25519 SHA256:abc";
+        let ev = PamWatcher::parse_auth_line(line).expect("Should parse sshd accepted log");
+        assert_eq!(ev.user, "root");
+        assert_eq!(ev.service, "sshd");
+        assert_eq!(ev.rhost, Some("10.0.8.2".to_string()));
+        assert!(ev.success);
+    }
+
+    #[test]
+    fn test_ignore_systemd_user_session() {
+        let line = "2026-08-31T12:48:18.180235-03:00 AMA-COCKPIT-01 (systemd): pam_unix(systemd-user:session): session opened for user root(uid=0) by root(uid=0)";
+        let ev = PamWatcher::parse_auth_line(line);
+        assert!(ev.is_none(), "systemd-user session opened must be ignored");
+    }
+
+    #[test]
+    fn test_ignore_sshd_pam_session_duplicate() {
+        let line = "2026-08-31T12:48:18.180235-03:00 AMA-COCKPIT-01 sshd[2605282]: pam_unix(sshd:session): session opened for user root(uid=0) by (uid=0)";
+        let ev = PamWatcher::parse_auth_line(line);
+        assert!(
+            ev.is_none(),
+            "sshd session opened must be ignored to avoid duplication"
+        );
     }
 }

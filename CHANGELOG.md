@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-08-31
+
+### Added
+- **Rate-Limited Asynchronous Queue for Telegram & WhatsApp**: Implemented non-blocking background MPSC message queues with strict rate limiting (1.05s interval for Telegram, 1.2s for WhatsApp) and automatic backoff retry on HTTP 429 (`retry_after`), preventing message drops and API rate limit bans during high-volume event bursts.
+- **PAM Noise Suppression**: Filtered internal `systemd-user:session` open logs to prevent noisy duplicate login notifications on distributions utilizing systemd user slices.
+
+---
+
 ## [1.0.4] - 2026-08-31
+
 
 ### Added
 - **Full RFC/Linux IPv6 Socket Decoding (`/proc/net/tcp6`)**: Implemented full 128-bit little-endian word parsing from Linux `/proc/net/tcp6` socket tables into standard `std::net::Ipv6Addr`, providing accurate remote IP tracking for IPv6 SSH and network connections during forensic auditing.
