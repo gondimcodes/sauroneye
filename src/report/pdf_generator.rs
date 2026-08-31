@@ -207,8 +207,15 @@ pub fn generate_pdf_report(
             actor_clean
         };
 
-        // Junta todas as linhas de detalhes em uma única string para exibição
-        let details_full = sanitize(&entry.details.replace('\n', " | "));
+        // Normaliza e limpa registros antigos do PURGE_LOGS se contiverem 'between X and Y'
+        let mut raw_details = entry.details.replace('\n', " | ");
+        if entry.action == "PURGE_LOGS" && raw_details.contains(" between ") {
+            if let Some((prefix, _)) = raw_details.split_once(" between ") {
+                raw_details = prefix.to_string();
+            }
+        }
+
+        let details_full = sanitize(&raw_details);
         let chars: Vec<char> = details_full.chars().collect();
 
         let line1: String = chars.iter().take(DETAILS_MAX_CHARS).collect();
@@ -239,6 +246,11 @@ pub fn generate_pdf_report(
 
     let mut warnings = Vec::new();
     let bytes = writer.doc.save(&PdfSaveOptions::default(), &mut warnings);
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
     std::fs::write(output_path, bytes)?;
 
     Ok(())
