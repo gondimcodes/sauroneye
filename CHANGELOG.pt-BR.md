@@ -10,6 +10,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [1.0.5] - 2026-08-31
 
 ### Adicionado
+- **Circuit Breaker Anti-Flood para WhatsApp**: Implementado disjuntor de proteção com janela deslizante de 60 segundos (limite de 10 alertas/minuto), supressão inteligente de rajadas e avisos consolidados de status (`Throttling Ativado` e `Alertas Retomados`), eliminando qualquer risco de banimento de número por spam na Meta.
 - **Fila Assíncrona com Rate Limiting para Telegram e WhatsApp**: Implementado sistema de filas MPSC em background com controle de vazão (intervalo de 1,05s para Telegram e 1,2s para WhatsApp) e retry com backoff automático em respostas HTTP 429 (`retry_after`), eliminando erros de limite de requisições durante tempestades de eventos.
 - **Supressão de Ruído no PAM**: Filtradas mensagens internas de abertura de sessão do `systemd-user:session`, evitando notificações de login redundantes e ruídos na trilha de auditoria.
 

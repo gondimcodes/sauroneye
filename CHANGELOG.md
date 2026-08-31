@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.5] - 2026-08-31
 
 ### Added
+- **Anti-Flood Circuit Breaker for WhatsApp**: Implemented rolling 60-second sliding-window circuit breaker (capped at 10 alerts/minute) with automated burst suppression and status notifications (`Throttling Activated` and `Alerting Resumed`), guaranteeing zero risk of WhatsApp account bans or gateway lockouts during mass file changes.
 - **Rate-Limited Asynchronous Queue for Telegram & WhatsApp**: Implemented non-blocking background MPSC message queues with strict rate limiting (1.05s interval for Telegram, 1.2s for WhatsApp) and automatic backoff retry on HTTP 429 (`retry_after`), preventing message drops and API rate limit bans during high-volume event bursts.
 - **PAM Noise Suppression**: Filtered internal `systemd-user:session` open logs to prevent noisy duplicate login notifications on distributions utilizing systemd user slices.
 
