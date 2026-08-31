@@ -232,6 +232,7 @@ async fn handle_init(
         ),
     );
     dispatcher.dispatch(alert).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     Ok(())
 }
@@ -265,6 +266,8 @@ async fn handle_update(
         ),
     );
     dispatcher.dispatch(alert).await;
+    // Wait for background worker tasks to flush and deliver HTTP alerts before CLI process exits
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     println!("✅ Baseline successfully updated in SQLite database!");
 
     Ok(())
@@ -296,8 +299,10 @@ async fn handle_passwd(
         "The SauronEye administrator password was successfully changed via CLI.",
     );
     dispatcher.dispatch(alert).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
 
     println!("✅ Admin password successfully updated with Argon2id encryption!");
+
     Ok(())
 }
 
