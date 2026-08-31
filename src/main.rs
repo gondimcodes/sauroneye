@@ -99,12 +99,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut dispatcher = AlertDispatcher::new();
     if let Some(ref tg) = config.notifications.telegram {
         if tg.enabled {
+            info!("Telegram notifier initialized (chat_id: {})", tg.chat_id);
             dispatcher.add_notifier(Arc::new(TelegramNotifier::new(tg.clone())));
+        } else {
+            info!("Telegram notifier is disabled in configuration.");
         }
     }
     if let Some(ref wa) = config.notifications.whatsapp {
         if wa.enabled {
+            info!(
+                "WhatsApp notifier initialized (endpoint: {}, recipient: {})",
+                wa.endpoint_url, wa.recipient_number
+            );
             dispatcher.add_notifier(Arc::new(WhatsappNotifier::new(wa.clone())));
+        } else {
+            info!("WhatsApp notifier is disabled in configuration.");
         }
     }
     let dispatcher = Arc::new(dispatcher);

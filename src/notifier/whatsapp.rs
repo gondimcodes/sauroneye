@@ -53,7 +53,7 @@ impl WhatsappNotifier {
                     }
                 }
 
-                // Check if Circuit Breaker condition is triggered
+                // Check Circuit Breaker threshold
                 if recent_timestamps.len() >= MAX_ALERTS_PER_MINUTE {
                     suppressed_count += 1;
                     if !circuit_breaker_active {
@@ -63,7 +63,6 @@ impl WhatsappNotifier {
                             MAX_ALERTS_PER_MINUTE
                         );
 
-                        // Send one consolidated throttling warning message to WhatsApp
                         let warning_msg = AlertMessage::with_timezone(
                             &alert.host,
                             "WhatsApp Alert Throttling Activated (Anti-Flood Circuit Breaker)",
@@ -85,11 +84,12 @@ impl WhatsappNotifier {
                         )
                         .await;
                     }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
                 }
 
-                // When volume normalizes below threshold
-                if circuit_breaker_active && recent_timestamps.len() < MAX_ALERTS_PER_MINUTE {
+                // When volume is within limits, if it was active, notify recovery
+                if circuit_breaker_active {
                     circuit_breaker_active = false;
                     if suppressed_count > 0 {
                         info!(
