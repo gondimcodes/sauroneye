@@ -96,12 +96,14 @@ pub trait Notifier: Send + Sync {
 
 pub struct AlertDispatcher {
     notifiers: Vec<Arc<dyn Notifier>>,
+    recent_dispatches: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
 }
 
 impl AlertDispatcher {
     pub fn new() -> Self {
         Self {
             notifiers: Vec::new(),
+            recent_dispatches: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -110,6 +112,24 @@ impl AlertDispatcher {
     }
 
     pub async fn dispatch(&self, alert: AlertMessage) {
+        // Deduplicação Global: Impede que qualquer alerta exatamente igual (mesmo título e detalhes)
+        // seja disparado em duplicidade dentro de 2.5 segundos
+        let dedup_key = format!("{}::{}", alert.title, alert.details);
+        let now = std::time::Instant::now();
+        {
+            if let Ok(mut map) = self.recent_dispatches.lock() {
+                // Remove entradas antigas para não acumular memória
+                map.retain(|_, v| now.duration_since(*v) < std::time::Duration::from_secs(10));
+
+                if let Some(last_time) = map.get(&dedup_key) {
+                    if now.duration_since(*last_time) < std::time::Duration::from_millis(2500) {
+                        return;
+                    }
+                }
+                map.insert(dedup_key, now);
+            }
+        }
+
         for notifier in &self.notifiers {
             if let Err(e) = notifier.send_alert(&alert).await {
                 error!("Failed to dispatch alert to notifier: {}", e);

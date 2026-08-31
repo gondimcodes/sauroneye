@@ -516,6 +516,16 @@ async fn handle_run(
                             };
 
                             if is_different {
+                                let key = format!("modified:{}:{}", path.display(), new_fingerprint.hash_value);
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        let _ = db.save_fingerprints_batch(&[new_fingerprint]);
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let analysis = analyzer.analyze_modification(&path, None, old_fp.as_ref(), &new_fingerprint);
 
                                 // Send alert only if it is tampering OR if user explicitly enabled notifications for legitimate package updates
@@ -541,6 +551,16 @@ async fn handle_run(
                             if let Some(ref old) = old_fp {
                                 // O arquivo já existia no banco de dados, mas foi recriado (padrão de salvamento atômico do Vim/editores)
                                 if old.hash_value != fingerprint.hash_value {
+                                    let key = format!("modified:{}:{}", path.display(), fingerprint.hash_value);
+                                    let now = std::time::Instant::now();
+                                    if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                        if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                            let _ = db.save_fingerprints_batch(&[fingerprint]);
+                                            continue;
+                                        }
+                                    }
+                                    recent_alert_debounce.insert(key, now);
+
                                     let analysis = analyzer.analyze_modification(&path, None, Some(old), &fingerprint);
                                     if !analysis.is_legitimate_update || config.package_manager.notify_legitimate_updates {
                                         let alert = AlertMessage::new(
@@ -614,6 +634,15 @@ async fn handle_run(
                         }
                         crate::fim::engine::FimEvent::DirectoryCreated { path, permissions, uid, gid } => {
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("created_dir:{}", path.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
@@ -652,7 +681,20 @@ async fn handle_run(
                             known_ownership.insert(path.clone(), (uid, gid));
                         }
                         crate::fim::engine::FimEvent::DirectoryDeleted { path } => {
+                            known_directories.remove(&path);
+                            known_permissions.remove(&path);
+                            known_ownership.remove(&path);
+
                             if !analyzer.is_package_manager_active() {
+                                let key = format!("deleted_dir:{}", path.display());
+                                let now = std::time::Instant::now();
+                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
+                                        continue;
+                                    }
+                                }
+                                recent_alert_debounce.insert(key, now);
+
                                 let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
                                 let ip_origin_str = if !active_sessions.is_empty() {
                                     active_sessions
