@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-08-31
+
+### Added
+- **Full RFC/Linux IPv6 Socket Decoding (`/proc/net/tcp6`)**: Implemented full 128-bit little-endian word parsing from Linux `/proc/net/tcp6` socket tables into standard `std::net::Ipv6Addr`, providing accurate remote IP tracking for IPv6 SSH and network connections during forensic auditing.
+
+---
+
 ## [1.0.3] - 2026-08-31
+
 
 ### Added
 - **RCE Whitelist Granular Patterns (`allowed_cmd_patterns`)**: Introduced customizable substring whitelist matching in `[rce_detector]` to allow legitimate child processes and internal scripts (e.g. Kong Gateway / OpenResty healthchecks in Supabase environments) while preserving real-time alerting on malicious shells and webshell intrusions.

@@ -7,7 +7,15 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.4] - 2026-08-31
+
+### Adicionado
+- **Decodificação Completa de Sockets IPv6 (`/proc/net/tcp6`)**: Implementado algoritmo de decodificação de 128 bits para tabelas de sockets Linux `/proc/net/tcp6` convertendo para `std::net::Ipv6Addr`, garantindo rastreabilidade forense precisa de IPs remotos em conexões SSH e de rede via IPv6.
+
+---
+
 ## [1.0.3] - 2026-08-31
+
 
 ### Adicionado
 - **Whitelist Granular de Comandos RCE (`allowed_cmd_patterns`)**: Implementado suporte a padrões e assinaturas personalizadas no `[rce_detector]` para autorizar comandos filhos legítimos (como verificações de saúde do Kong Gateway / OpenResty no ecossistema Supabase), mantendo proteção ativa em tempo real contra webshells e injeções maliciosas.

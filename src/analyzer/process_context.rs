@@ -1,5 +1,5 @@
 use std::fs;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub struct ProcessInspector;
 
@@ -183,13 +183,58 @@ impl ProcessInspector {
             if local_port == 22 || local_port == 2222 {
                 let remote_hex = remote_parts[0];
                 if remote_hex.len() == 32 {
-                    if remote_hex == "00000000000000000000000001000000" {
-                        return Some("::1 (localhost)".to_string());
+                    // /proc/net/tcp6 stores IPv6 in 4 32-bit words in host byte order (little-endian on x86/ARM)
+                    let mut bytes = [0u8; 16];
+                    for i in 0..4 {
+                        let chunk = &remote_hex[i * 8..(i + 1) * 8];
+                        let word = u32::from_str_radix(chunk, 16).ok()?;
+                        let le_bytes = word.to_le_bytes();
+                        bytes[i * 4..(i + 1) * 4].copy_from_slice(&le_bytes);
                     }
-                    return Some("IPv6 remote client".to_string());
+                    let ip = Ipv6Addr::from(bytes);
+                    let port = u16::from_str_radix(remote_parts[1], 16).ok().unwrap_or(0);
+                    return Some(format!("[{}]:{}", ip, port));
                 }
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hex_ipv4() {
+        // 0100007F = 127.0.0.1 in little-endian, port 0016 = 22
+        let remote = "0100007F:C350"; // 127.0.0.1:50000
+        let local = "00000000:0016"; // 0.0.0.0:22
+        let res = ProcessInspector::parse_hex_ipv4(remote, local);
+        assert_eq!(res, Some("127.0.0.1:50000".to_string()));
+    }
+
+    #[test]
+    fn test_parse_hex_ipv6_loopback() {
+        // ::1 in /proc/net/tcp6 hex format: 00000000000000000000000001000000
+        let remote = "00000000000000000000000001000000:D431"; // [::1]:54321
+        let local = "00000000000000000000000000000000:0016"; // [::]:22
+        let res = ProcessInspector::parse_hex_ipv6(remote, local);
+        assert_eq!(res, Some("[::1]:54321".to_string()));
+    }
+
+    #[test]
+    fn test_parse_hex_ipv6_public() {
+        // 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+        // Word 0: 2001:0db8 -> bytes: 20 01 0d b8 -> little endian u32: b8 0d 01 20 = B80D0120
+        // Let's verify with 2804:14d:1::1:
+        // Word 0: 2804:014d -> le word: 4D010428
+        // Word 1: 0001:0000 -> le word: 00000100
+        // Word 2: 0000:0000 -> le word: 00000000
+        // Word 3: 0000:0001 -> le word: 01000000
+        let remote = "4D010428000001000000000001000000:C350";
+        let local = "00000000000000000000000000000000:0016";
+        let res = ProcessInspector::parse_hex_ipv6(remote, local);
+        assert_eq!(res, Some("[2804:14d:1::1]:50000".to_string()));
     }
 }
