@@ -90,6 +90,44 @@ impl PdfReportWriter {
         };
         page.ops.push(Op::DrawLine { line });
     }
+
+    fn vline(&mut self, x: f32, start_y: f32, end_y: f32) {
+        let page = &mut self.doc.pages[self.page_index];
+        let line = Line {
+            points: vec![
+                LinePoint {
+                    p: Point::new(Mm(x), Mm(start_y)),
+                    bezier: false,
+                },
+                LinePoint {
+                    p: Point::new(Mm(x), Mm(end_y)),
+                    bezier: false,
+                },
+            ],
+            is_closed: false,
+        };
+        page.ops.push(Op::DrawLine { line });
+    }
+
+    fn draw_row_box(
+        &mut self,
+        top_y: f32,
+        bottom_y: f32,
+        x_left: f32,
+        x_right: f32,
+        col_splits: &[f32],
+    ) {
+        // Linha superior e inferior
+        self.hline(top_y, x_left, x_right);
+        self.hline(bottom_y, x_left, x_right);
+        // Bordas externas esquerda e direita
+        self.vline(x_left, top_y, bottom_y);
+        self.vline(x_right, top_y, bottom_y);
+        // Divisores verticais de colunas
+        for &x in col_splits {
+            self.vline(x, top_y, bottom_y);
+        }
+    }
 }
 
 pub fn generate_pdf_report(
@@ -162,51 +200,55 @@ pub fn generate_pdf_report(
     writer.text_at(&summary_text, 8.0, MARGIN, false);
     writer.y -= 7.0;
 
-    // Table Header
+    // Table Section
     writer.text_at("CHRONOLOGICAL SECURITY AUDIT TRAIL", 10.0, MARGIN, true);
-    writer.y -= 5.5;
+    writer.y -= 4.5;
 
-    // Colunas: A4 = 210mm, margens = 15mm cada lado → 180mm úteis (x de 15mm a 195mm)
-    // Col 0: Timestamp (UTC)   → x = 15.0  (largura ~24mm, texto ocupa ~22mm)
-    // Col 1: Action / Severity → x = 39.0  (largura ~31mm, texto ocupa ~28mm)
-    // Col 2: Actor / IP        → x = 70.0  (largura ~25mm, suficiente para IPv6 e nomes)
-    // Col 3: Details / Path    → x = 95.0  (largura ~100mm até margem direita de 195mm!)
-    let col_ts = MARGIN; // 15.0
-    let col_action = MARGIN + 24.0; // 39.0
-    let col_actor = MARGIN + 55.0; // 70.0
-    let col_details = MARGIN + 80.0; // 95.0
+    // Dimensões da tabela:
+    // A4 = 210mm, margens = 15mm cada lado → 180mm de largura total (15mm a 195mm)
+    let table_x_start = MARGIN; // 15.0
+    let table_x_end = PAGE_W - MARGIN; // 195.0
 
-    writer.text_at("TIMESTAMP (UTC)", 7.5, col_ts, true);
-    writer.text_at("ACTION / SEVERITY", 7.5, col_action, true);
-    writer.text_at("ACTOR / IP", 7.5, col_actor, true);
-    writer.text_at("DETAILS / FILE PATH", 7.5, col_details, true);
-    writer.y -= 4.0;
+    // Divisores verticais das colunas:
+    // Col 0: 15.0  a 43.0  (28mm - Timestamp)
+    // Col 1: 43.0  a 83.0  (40mm - Action/Severity)
+    // Col 2: 83.0  a 109.0 (26mm - Actor/IP)
+    // Col 3: 109.0 a 195.0 (86mm - Details / File Path)
+    let split_1 = MARGIN + 28.0; // 43.0
+    let split_2 = MARGIN + 68.0; // 83.0
+    let split_3 = MARGIN + 94.0; // 109.0
+    let col_splits = [split_1, split_2, split_3];
 
-    // Largura disponível para detalhes em mm (~100mm) a ~1.85 chars/mm em 7pt
-    const DETAILS_MAX_CHARS: usize = 70;
+    // Padding de texto dentro das células
+    let pad_x = 1.5;
+    let col_ts_text = table_x_start + pad_x;
+    let col_action_text = split_1 + pad_x;
+    let col_actor_text = split_2 + pad_x;
+    let col_details_text = split_3 + pad_x;
+
+    // Cabeçalho da Tabela
+    let header_top_y = writer.y;
+    let header_bottom_y = header_top_y - 6.0;
+
+    writer.draw_row_box(
+        header_top_y,
+        header_bottom_y,
+        table_x_start,
+        table_x_end,
+        &col_splits,
+    );
+
+    writer.y = header_top_y - 4.2;
+    writer.text_at("TIMESTAMP (UTC)", 7.0, col_ts_text, true);
+    writer.text_at("ACTION / SEVERITY", 7.0, col_action_text, true);
+    writer.text_at("ACTOR / IP", 7.0, col_actor_text, true);
+    writer.text_at("DETAILS / FILE PATH", 7.0, col_details_text, true);
+
+    writer.y = header_bottom_y;
+
+    const DETAILS_MAX_CHARS: usize = 62;
 
     for entry in logs {
-        writer.ensure_space(12.0);
-
-        let ts_str = Utc
-            .timestamp_opt(entry.timestamp, 0)
-            .single()
-            .map(|d: DateTime<Utc>| d.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_default();
-        let action_clean = sanitize(&entry.action);
-        let actor_clean = sanitize(&entry.actor);
-        let actor_formatted = if actor_clean.contains(" [") && actor_clean.ends_with(']') {
-            actor_clean
-        } else if let Some((user, ip)) = actor_clean.split_once(":::") {
-            format!("{} [::{}]", user, ip)
-        } else if let Some((user, ip)) = actor_clean.split_once(':') {
-            format!("{} [{}]", user, ip)
-        } else if actor_clean.contains('.') || actor_clean.contains(':') {
-            format!("[{}]", actor_clean)
-        } else {
-            actor_clean
-        };
-
         // Normaliza e limpa registros antigos do PURGE_LOGS se contiverem 'between X and Y'
         let mut raw_details = entry.details.replace('\n', " | ");
         if entry.action == "PURGE_LOGS" && raw_details.contains(" between ") {
@@ -230,18 +272,65 @@ pub fn generate_pdf_report(
             String::new()
         };
 
-        writer.text_at(&ts_str, 7.0, col_ts, false);
-        writer.text_at(&action_clean, 7.0, col_action, false);
-        writer.text_at(&actor_formatted, 7.0, col_actor, false);
-        writer.text_at(&line1, 7.0, col_details, false);
+        let row_height = if has_line2 { 8.5 } else { 5.5 };
+
+        // Garante espaço para a linha da tabela e redesenha o cabeçalho se pular de página
+        if writer.y - row_height < (MARGIN + 10.0) {
+            writer.new_page();
+            writer.y -= 5.0;
+            let h_top = writer.y;
+            let h_bot = h_top - 6.0;
+            writer.draw_row_box(h_top, h_bot, table_x_start, table_x_end, &col_splits);
+            writer.y = h_top - 4.2;
+            writer.text_at("TIMESTAMP (UTC)", 7.0, col_ts_text, true);
+            writer.text_at("ACTION / SEVERITY", 7.0, col_action_text, true);
+            writer.text_at("ACTOR / IP", 7.0, col_actor_text, true);
+            writer.text_at("DETAILS / FILE PATH", 7.0, col_details_text, true);
+            writer.y = h_bot;
+        }
+
+        let row_top_y = writer.y;
+        let row_bottom_y = row_top_y - row_height;
+
+        writer.draw_row_box(
+            row_top_y,
+            row_bottom_y,
+            table_x_start,
+            table_x_end,
+            &col_splits,
+        );
+
+        let ts_str = Utc
+            .timestamp_opt(entry.timestamp, 0)
+            .single()
+            .map(|d: DateTime<Utc>| d.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_default();
+        let action_clean = sanitize(&entry.action);
+        let actor_clean = sanitize(&entry.actor);
+        let actor_formatted = if actor_clean.contains(" [") && actor_clean.ends_with(']') {
+            actor_clean
+        } else if let Some((user, ip)) = actor_clean.split_once(":::") {
+            format!("{} [::{}]", user, ip)
+        } else if let Some((user, ip)) = actor_clean.split_once(':') {
+            format!("{} [{}]", user, ip)
+        } else if actor_clean.contains('.') || actor_clean.contains(':') {
+            format!("[{}]", actor_clean)
+        } else {
+            actor_clean
+        };
+
+        writer.y = row_top_y - 4.0;
+        writer.text_at(&ts_str, 6.8, col_ts_text, false);
+        writer.text_at(&action_clean, 6.8, col_action_text, false);
+        writer.text_at(&actor_formatted, 6.8, col_actor_text, false);
+        writer.text_at(&line1, 6.8, col_details_text, false);
 
         if has_line2 {
-            writer.y -= 4.0;
-            writer.text_at(&line2, 7.0, col_details, false);
-            writer.y -= 4.2;
-        } else {
-            writer.y -= 4.2;
+            writer.y = row_top_y - 7.5;
+            writer.text_at(&line2, 6.8, col_details_text, false);
         }
+
+        writer.y = row_bottom_y;
     }
 
     let mut warnings = Vec::new();
