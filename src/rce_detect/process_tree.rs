@@ -40,31 +40,46 @@ impl RceDetector {
 
             if let Ok(pid) = name_str.parse::<u32>() {
                 if let Some(ppid) = ProcessInspector::get_parent_pid(pid) {
-                    if let Some(parent_comm) = ProcessInspector::get_process_name(ppid) {
-                        if self.is_protected_service(&parent_comm) {
-                            if let Some(child_exe) = ProcessInspector::get_process_exe(pid) {
-                                if self.is_forbidden_child(&child_exe) {
-                                    let raw_cmd = ProcessInspector::get_process_cmdline(pid)
-                                        .unwrap_or_else(|| child_exe.clone());
-                                    let child_cmd: String = raw_cmd
-                                        .chars()
-                                        .map(|c| {
-                                            if c.is_control() || c == '\n' || c == '\r' {
-                                                ' '
-                                            } else {
-                                                c
-                                            }
-                                        })
-                                        .collect();
+                    let parent_comm = ProcessInspector::get_process_name(ppid);
+                    let parent_exe = ProcessInspector::get_process_exe(ppid);
 
-                                    alerts.push(RceAlert {
-                                        parent_service: parent_comm,
-                                        parent_pid: ppid,
-                                        child_cmd,
-                                        child_pid: pid,
-                                    });
-                                }
-                            }
+                    if self.is_protected_service(parent_comm.as_deref(), parent_exe.as_deref()) {
+                        let child_exe = ProcessInspector::get_process_exe(pid);
+                        let child_comm = ProcessInspector::get_process_name(pid);
+                        let raw_cmd = ProcessInspector::get_process_cmdline(pid)
+                            .or_else(|| child_exe.clone())
+                            .or_else(|| child_comm.clone())
+                            .unwrap_or_default();
+
+                        if self.is_forbidden_child(
+                            child_exe.as_deref(),
+                            child_comm.as_deref(),
+                            &raw_cmd,
+                        ) {
+                            let child_cmd: String = raw_cmd
+                                .chars()
+                                .map(|c| {
+                                    if c.is_control() || c == '\n' || c == '\r' {
+                                        ' '
+                                    } else {
+                                        c
+                                    }
+                                })
+                                .collect();
+
+                            let parent_name = parent_comm
+                                .or_else(|| {
+                                    parent_exe
+                                        .and_then(|p| p.split('/').last().map(|s| s.to_string()))
+                                })
+                                .unwrap_or_else(|| format!("PID:{}", ppid));
+
+                            alerts.push(RceAlert {
+                                parent_service: parent_name,
+                                parent_pid: ppid,
+                                child_cmd,
+                                child_pid: pid,
+                            });
                         }
                     }
                 }
@@ -74,19 +89,55 @@ impl RceDetector {
         alerts
     }
 
-    fn is_protected_service(&self, name: &str) -> bool {
-        self.protected_services.contains(name)
-    }
-
-    fn is_forbidden_child(&self, path: &str) -> bool {
-        for forbidden in &self.config.forbidden_children {
-            if forbidden.ends_with('*') {
-                let prefix = &forbidden[..forbidden.len() - 1];
-                if path.starts_with(prefix) {
+    fn is_protected_service(&self, comm: Option<&str>, exe: Option<&str>) -> bool {
+        for protected in &self.protected_services {
+            if let Some(c) = comm {
+                if c == protected || c.starts_with(protected) {
                     return true;
                 }
-            } else if path == forbidden || path.ends_with(&format!("/{}", forbidden)) {
-                return true;
+            }
+            if let Some(e) = exe {
+                let binary_name = e.split('/').last().unwrap_or(e);
+                if binary_name == protected
+                    || binary_name.starts_with(protected)
+                    || e.contains(protected)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_forbidden_child(&self, exe: Option<&str>, comm: Option<&str>, cmd: &str) -> bool {
+        let exe_bin = exe.and_then(|e| e.split('/').last()).unwrap_or("");
+        let exe_path = exe.unwrap_or("");
+        let comm_str = comm.unwrap_or("");
+
+        for forbidden in &self.config.forbidden_children {
+            let f = forbidden.as_str();
+
+            // 1. Wildcard pattern (e.g. /usr/bin/python*, nc*)
+            if f.ends_with('*') {
+                let prefix = &f[..f.len() - 1];
+                let prefix_bin = prefix.split('/').last().unwrap_or(prefix);
+                if exe_path.starts_with(prefix)
+                    || exe_bin.starts_with(prefix_bin)
+                    || comm_str.starts_with(prefix_bin)
+                    || cmd.starts_with(prefix)
+                {
+                    return true;
+                }
+            } else {
+                let forbidden_bin = f.split('/').last().unwrap_or(f);
+                if exe_path == f
+                    || exe_bin == forbidden_bin
+                    || comm_str == forbidden_bin
+                    || cmd.starts_with(f)
+                    || cmd.starts_with(forbidden_bin)
+                {
+                    return true;
+                }
             }
         }
         false
