@@ -118,17 +118,20 @@ impl RceDetector {
 
     fn is_protected_service(&self, comm: Option<&str>, exe: Option<&str>) -> bool {
         for protected in &self.protected_services {
+            let protected_name = protected.strip_prefix('/').unwrap_or(protected);
+            let protected_bin = protected_name
+                .split('/')
+                .next_back()
+                .unwrap_or(protected_name);
+
             if let Some(c) = comm {
-                if c == protected || c.starts_with(protected) {
+                if c == protected_bin || c == protected {
                     return true;
                 }
             }
             if let Some(e) = exe {
                 let binary_name = e.split('/').next_back().unwrap_or(e);
-                if binary_name == protected
-                    || binary_name.starts_with(protected)
-                    || e.contains(protected)
-                {
+                if binary_name == protected_bin || e == protected {
                     return true;
                 }
             }
