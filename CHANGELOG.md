@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.6] - In Progress
+## [1.0.6] - 2026-08-31
 
 ### Added
 - **Microsoft Teams Webhook Notifier**: Added native Microsoft Teams alert integration via Incoming Webhooks (Workflows) with Adaptive Cards v1.4, severity color accents, structured fact sets, and dedicated anti-flood Circuit Breaker (capped at 20 alerts/minute).
 - **Discord Webhook Notifier**: Added native Discord alert integration via incoming webhooks with styled Rich Embeds (color-coded by severity: Critical red, Warning orange, Info blue), customizable bot username/avatar, and dedicated anti-flood Circuit Breaker (capped at 30 alerts/minute).
-- **Security Alert on Log Purge (`sauroneye logs --purge`)**: Dispatches an explicit security alert to all active notification channels whenever an administrator purges audit log entries from the database, preventing silent log tampering.
+- **Security Alert & IP Auditing on Log Purge (`sauroneye logs --purge`)**: Dispatches an explicit security alert to all active notification channels and records the operator's real remote IP whenever an administrator purges audit log entries from the database, preventing silent log tampering.
+- **Operator Remote IP Tracking on CLI Actions**: All administrative CLI operations (`update`, `passwd`, `logs --purge`) now capture and log the operator's active SSH session origin IP (`admin:IP`).
+- **Native Immutable Watch on `/etc/sauroneye`**: Added kernel-level immutable watch on the daemon configuration directory.
+
 
 
 
