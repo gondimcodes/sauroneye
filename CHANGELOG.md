@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.6] - In Progress
+
+### Added
+- **Microsoft Teams Webhook Notifier**: Added native Microsoft Teams alert integration via incoming webhooks with rich Adaptive Cards v1.4, severity color accents, fact sets, and dedicated anti-flood Circuit Breaker (capped at 20 alerts/minute).
+- **Discord Webhook Notifier**: Added native Discord alert integration via incoming webhooks with styled Rich Embeds (color-coded by severity: Critical red, Warning orange, Info blue), customizable bot username/avatar, and dedicated anti-flood Circuit Breaker (capped at 30 alerts/minute).
+
+---
+
 ## [1.0.5] - 2026-08-31
+
 
 ### Added
 - **Anti-Flood Circuit Breaker for WhatsApp**: Implemented rolling 60-second sliding-window circuit breaker (capped at 10 alerts/minute) with automated burst suppression and status notifications (`Throttling Activated` and `Alerting Resumed`), guaranteeing zero risk of WhatsApp account bans or gateway lockouts during mass file changes.

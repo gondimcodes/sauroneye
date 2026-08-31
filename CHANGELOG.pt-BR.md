@@ -7,7 +7,16 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.6] - Em Andamento
+
+### Adicionado
+- **Notificador de Webhook para Microsoft Teams**: Implementada integração nativa de alertas para o Microsoft Teams via Incoming Webhooks com Adaptive Cards v1.4 ricos, destaques visuais por severidade, conjuntos de fatos e Circuit Breaker anti-flood dedicado (limite de 20 alertas/minuto).
+- **Notificador de Webhook para Discord**: Implementada integração nativa de alertas para o Discord via Incoming Webhooks com Rich Embeds estilizados (cores por severidade: Crítico vermelho, Atenção laranja, Info azul), suporte a customização de nome/avatar do bot e Circuit Breaker anti-flood dedicado (limite de 30 alertas/minuto).
+
+---
+
 ## [1.0.5] - 2026-08-31
+
 
 ### Adicionado
 - **Circuit Breaker Anti-Flood para WhatsApp**: Implementado disjuntor de proteção com janela deslizante de 60 segundos (limite de 10 alertas/minuto), supressão inteligente de rajadas e avisos consolidados de status (`Throttling Ativado` e `Alertas Retomados`), eliminando qualquer risco de banimento de número por spam na Meta.

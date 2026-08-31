@@ -144,6 +144,10 @@ pub struct NotificationsConfig {
     #[serde(default)]
     pub whatsapp: Option<WhatsappConfig>,
     #[serde(default)]
+    pub msteams: Option<MsTeamsConfig>,
+    #[serde(default)]
+    pub discord: Option<DiscordConfig>,
+    #[serde(default)]
     pub smtp: Option<SmtpConfig>,
 }
 
@@ -186,6 +190,28 @@ pub struct WhatsappConfig {
     pub endpoint_url: String,
     pub api_key: String,
     pub recipient_number: String,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MsTeamsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub webhook_url: String,
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub webhook_url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
 }

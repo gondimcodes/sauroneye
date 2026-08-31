@@ -1,4 +1,6 @@
+pub mod discord;
 pub mod email;
+pub mod msteams;
 pub mod telegram;
 pub mod whatsapp;
 
@@ -6,7 +8,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tracing::error;
 
+pub use discord::DiscordNotifier;
 pub use email::SmtpNotifier;
+pub use msteams::MsTeamsNotifier;
 pub use telegram::TelegramNotifier;
 pub use whatsapp::WhatsappNotifier;
 

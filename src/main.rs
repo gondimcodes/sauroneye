@@ -29,8 +29,10 @@ use crate::db::AuditLogEntry;
 use crate::db::Database;
 use crate::fim::FimEngine;
 use crate::notifier::{
-    AlertDispatcher, AlertMessage, AlertSeverity, SmtpNotifier, TelegramNotifier, WhatsappNotifier,
+    AlertDispatcher, AlertMessage, AlertSeverity, DiscordNotifier, MsTeamsNotifier, SmtpNotifier,
+    TelegramNotifier, WhatsappNotifier,
 };
+
 use crate::rce_detect::RceDetector;
 use crate::report::generate_pdf_report;
 
@@ -95,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cli = Cli::parse();
     let config = Config::load_from_file(&cli.config)?;
 
-    // Initialize notification dispatcher (Telegram & WhatsApp for real-time alerts)
+    // Initialize notification dispatcher (Telegram, WhatsApp, MS Teams & Discord for real-time alerts)
     let mut dispatcher = AlertDispatcher::new();
     if let Some(ref tg) = config.notifications.telegram {
         if tg.enabled {
@@ -114,6 +116,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             dispatcher.add_notifier(Arc::new(WhatsappNotifier::new(wa.clone())));
         } else {
             info!("WhatsApp notifier is disabled in configuration.");
+        }
+    }
+    if let Some(ref teams) = config.notifications.msteams {
+        if teams.enabled {
+            info!("Microsoft Teams notifier initialized (webhook configured)");
+            dispatcher.add_notifier(Arc::new(MsTeamsNotifier::new(teams.clone())));
+        } else {
+            info!("Microsoft Teams notifier is disabled in configuration.");
+        }
+    }
+    if let Some(ref discord) = config.notifications.discord {
+        if discord.enabled {
+            info!("Discord notifier initialized (webhook configured)");
+            dispatcher.add_notifier(Arc::new(DiscordNotifier::new(discord.clone())));
+        } else {
+            info!("Discord notifier is disabled in configuration.");
         }
     }
     let dispatcher = Arc::new(dispatcher);
