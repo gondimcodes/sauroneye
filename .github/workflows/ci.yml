@@ -102,7 +102,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/release/sauroneye dist/
-          cp config.toml.example README.md README.pt-BR.md INSTALL.md INSTALL.pt-BR.md TECH_STACK.md LICENSE dist/
+          cp config.toml.example README.md README.pt-BR.md CHANGELOG.md CHANGELOG.pt-BR.md INSTALL.md INSTALL.pt-BR.md TECH_STACK.md LICENSE dist/
           tar -czvf sauroneye-linux-x86_64.tar.gz -C dist .
 
       - name: Upload Artifact
