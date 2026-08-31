@@ -117,7 +117,7 @@ forbidden_children = [
 ]
 
 [notifications.telegram]
-enabled = true
+enabled = false
 bot_token = "YOUR_BOT_TOKEN_HERE"
 chat_id = "-1001234567890"
 silent = false
