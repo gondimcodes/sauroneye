@@ -25,6 +25,7 @@ use crate::cli::banner::print_banner;
 use crate::cli::time_parser::parse_time_argument;
 use crate::config::Config;
 use crate::db::user::AdminAuth;
+use crate::db::AuditLogEntry;
 use crate::db::Database;
 use crate::fim::FimEngine;
 use crate::notifier::{
@@ -267,7 +268,7 @@ fn handle_status(
 }
 
 fn handle_logs(
-    _config: &Config,
+    config: &Config,
     db: &Database,
     from: &str,
     to: &str,
@@ -293,7 +294,15 @@ fn handle_logs(
         return Ok(());
     }
 
-    let logs = db.query_audit_logs(start_ts, end_ts)?;
+    let raw_logs = db.query_audit_logs(start_ts, end_ts)?;
+    let logs: Vec<AuditLogEntry> = if !config.package_manager.notify_legitimate_updates {
+        raw_logs
+            .into_iter()
+            .filter(|l| l.action != "PACKAGE_UPDATE")
+            .collect()
+    } else {
+        raw_logs
+    };
     println!(
         "\n📜 === SauronEye Forensic Audit Logs (Total: {}) ===",
         logs.len()
@@ -350,7 +359,15 @@ async fn handle_report(
     let end_ts = parse_time_argument(to).map_err(|e| format!("Error in --to parameter: {}", e))?;
 
     println!("👁️  Generating Forensic Security Audit PDF Report...");
-    let logs = db.query_audit_logs(start_ts, end_ts)?;
+    let raw_logs = db.query_audit_logs(start_ts, end_ts)?;
+    let logs: Vec<AuditLogEntry> = if !config.package_manager.notify_legitimate_updates {
+        raw_logs
+            .into_iter()
+            .filter(|l| l.action != "PACKAGE_UPDATE")
+            .collect()
+    } else {
+        raw_logs
+    };
 
     generate_pdf_report(&config.general.hostname, start_ts, end_ts, &logs, output)?;
     println!("✅ PDF Report generated successfully: {}", output.display());
