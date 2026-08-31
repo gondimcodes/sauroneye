@@ -136,6 +136,18 @@ api_key = "YOUR_API_KEY_HERE"
 recipient_number = "5511999999999"
 timeout_secs = 10
 
+[notifications.msteams]
+enabled = false
+webhook_url = "https://prod-xx.westus.logic.azure.com:443/workflows/YOUR_WORKFLOW_ID/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=YOUR_SIGNATURE"
+timeout_secs = 10
+
+[notifications.discord]
+enabled = false
+webhook_url = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+username = "SauronEye Sentinel"
+# avatar_url = "https://myserver.com/sauroneye_avatar.png"
+timeout_secs = 10
+
 [notifications.smtp]
 enabled = false
 host = "smtp.myserver.com"
@@ -146,3 +158,4 @@ from_address = "SauronEye Sentinel <alerts@myserver.com>"
 # Default recipient for automated system email alerts
 to_default = "security-team@myserver.com"
 use_tls = true
+
