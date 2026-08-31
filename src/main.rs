@@ -568,7 +568,9 @@ async fn handle_run(
                     "The sentinel daemon received a SIGTERM signal and is shutting down! Service was stopped or system is restarting.",
                 );
                 let _ = db.record_audit_log("DAEMON_STOP", "system", "SauronEye stopped by SIGTERM");
-                let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
+                dispatcher.dispatch(alert).await;
+                // Wait for background worker tasks to flush and deliver the HTTP request
+                tokio::time::sleep(Duration::from_millis(1500)).await;
                 std::process::exit(0);
             }
             _ = sigint.recv() => {
@@ -580,9 +582,13 @@ async fn handle_run(
                     "The sentinel daemon was manually interrupted (SIGINT / Ctrl+C) and is shutting down!",
                 );
                 let _ = db.record_audit_log("DAEMON_STOP", "system", "SauronEye interrupted by SIGINT");
-                let _ = tokio::time::timeout(Duration::from_secs(2), dispatcher.dispatch(alert)).await;
+                dispatcher.dispatch(alert).await;
+                // Wait for background worker tasks to flush and deliver the HTTP request
+                tokio::time::sleep(Duration::from_millis(1500)).await;
                 std::process::exit(0);
             }
+
+
             _ = sleep(poll_interval) => {
                 // 1. Process Real-Time FIM Events
                 while let Ok(fim_event) = fim_rx.try_recv() {

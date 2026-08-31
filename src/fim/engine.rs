@@ -116,8 +116,17 @@ impl FimEngine {
     /// Performs full recursive baseline scanning of configured paths.
     pub fn scan_baseline(&self) -> Vec<FileFingerprint> {
         let mut fingerprints = Vec::new();
+        let mut scan_paths = self.config.include_paths.clone();
+        let internal_dir = PathBuf::from("/var/lib/sauroneye");
+        if internal_dir.exists() && !scan_paths.contains(&internal_dir) {
+            scan_paths.push(internal_dir);
+        }
+        let config_dir = PathBuf::from("/etc/sauroneye");
+        if config_dir.exists() && !scan_paths.contains(&config_dir) {
+            scan_paths.push(config_dir);
+        }
 
-        for include_path in &self.config.include_paths {
+        for include_path in &scan_paths {
             if !include_path.exists() {
                 warn!(
                     "Configured FIM path does not exist: {}",
@@ -200,6 +209,21 @@ impl FimEngine {
         let var_lib = Path::new("/var/lib");
         if var_lib.exists() && !self.config.include_paths.contains(&var_lib.to_path_buf()) {
             let _ = watcher.watch(var_lib, RecursiveMode::NonRecursive);
+        }
+
+        // 3. Proteção Nativa e Inviolável das configurações do daemon (/etc/sauroneye)
+        let config_dir = Path::new("/etc/sauroneye");
+        if config_dir.exists()
+            && !self
+                .config
+                .include_paths
+                .contains(&config_dir.to_path_buf())
+        {
+            info!(
+                "Registering native immutable FIM watch on daemon configuration directory: {}",
+                config_dir.display()
+            );
+            let _ = watcher.watch(config_dir, RecursiveMode::Recursive);
         }
 
         let active_exclusions = self.active_exclusions.clone();
