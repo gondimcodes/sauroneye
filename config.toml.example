@@ -36,15 +36,7 @@ include_paths = [
 # Excluded patterns and global transient noise paths
 exclude_paths = [
     "/etc/mtab",
-    "/etc/resolv.conf",
-    # Text editor temporary/swap noise (Vim, Nano, Emacs, GIO)
-    "*.swp",
-    "*.swx",
-    "*.swo",
-    "*~",
-    "4913*",             # Vim atomic inode check files (starts at 4913, increments up to 4913+10000)
-    "*.tmp",
-    ".goutputstream-*"
+    "/etc/resolv.conf"
 ]
 
 # Distro Profile: "auto", "debian", "redhat", "alpine", "arch" or "none"
