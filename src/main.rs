@@ -54,6 +54,8 @@ enum Commands {
     Init,
     /// Updates system baseline recalculating fingerprints (requires admin authentication)
     Update,
+    /// Changes admin password (requires current password verification)
+    Passwd,
     /// Runs daemon in foreground for real-time monitoring
     Run,
     /// Displays current configuration and database status
@@ -115,6 +117,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         Commands::Update => {
             handle_update(&config, &db, &dispatcher).await?;
+        }
+        Commands::Passwd => {
+            handle_passwd(&config, &db, &dispatcher).await?;
         }
         Commands::Status => {
             handle_status(&config, &db)?;
@@ -234,6 +239,37 @@ async fn handle_update(
     dispatcher.dispatch(alert).await;
     println!("✅ Baseline successfully updated in SQLite database!");
 
+    Ok(())
+}
+
+async fn handle_passwd(
+    config: &Config,
+    db: &Database,
+    dispatcher: &Arc<AlertDispatcher>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!("👁️  === Change Admin Password (sauroneye passwd) ===");
+    authenticate_admin(db)?;
+
+    println!("\n🔑 Please enter the new password details:");
+    let new_password = AuthPrompt::prompt_new_password()?;
+    let new_password_hash = AdminAuth::hash_password(&new_password)?;
+
+    db.update_admin_password(&new_password_hash)?;
+    db.record_audit_log(
+        "CHANGE_PASSWORD",
+        "admin",
+        "Admin password changed successfully",
+    )?;
+
+    let alert = AlertMessage::new(
+        &config.general.hostname,
+        "Admin Password Changed",
+        AlertSeverity::Warning,
+        "The SauronEye administrator password was successfully changed via CLI.",
+    );
+    dispatcher.dispatch(alert).await;
+
+    println!("✅ Admin password successfully updated with Argon2id encryption!");
     Ok(())
 }
 

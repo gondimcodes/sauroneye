@@ -73,6 +73,18 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_admin_password(
+        &self,
+        new_password_hash: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE admin_users SET password_hash = ?1 WHERE username = 'admin'",
+            params![new_password_hash],
+        )?;
+        Ok(())
+    }
+
     pub fn verify_admin_login(&self, password: &str) -> Result<bool, Box<dyn Error + Send + Sync>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt =

@@ -94,7 +94,13 @@ sauroneye report --output /var/log/sauroneye/report.pdf --from "2026-08-30 00:00
 sauroneye report --output /tmp/report.pdf --from "2026-08-01" --to "2026-08-30" --email "security@empresa.com.br"
 ```
 
-### 6. Check Sentinel Status
+### 6. Change Admin Password
+```bash
+# Change admin password (requires current password verification and Argon2id re-hashing)
+sauroneye passwd
+```
+
+### 7. Check Sentinel Status
 ```bash
 sauroneye --config config.toml status
 ```

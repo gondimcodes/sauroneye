@@ -94,7 +94,13 @@ sauroneye report --output /var/log/sauroneye/relatorio.pdf --from "2026-08-30 00
 sauroneye report --output /tmp/relatorio.pdf --from "2026-08-01" --to "2026-08-30" --email "seguranca@empresa.com.br"
 ```
 
-### 6. Verificação de Status
+### 6. Alterar Senha do Administrador
+```bash
+# Altera a senha do admin (solicita confirmação da senha atual e gera novo hash Argon2id)
+sauroneye passwd
+```
+
+### 7. Verificação de Status
 ```bash
 sauroneye --config config.toml status
 ```

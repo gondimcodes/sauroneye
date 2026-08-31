@@ -7,6 +7,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.2] - 2026-08-31
+
+### Adicionado
+- **Comando de Troca de Senha do Administrador**: Adicionado o comando CLI `sauroneye passwd` permitindo aos operadores atualizar com segurança a senha do admin após validação da senha atual, recalculando novos hashes Argon2id com salt criptográfico de 128 bits.
+
+---
+
 ## [1.0.1] - 2026-08-31
 
 ### Adicionado

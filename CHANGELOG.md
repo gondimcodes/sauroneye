@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] - 2026-08-31
+
+### Added
+- **Admin Password Change Command**: Added `sauroneye passwd` CLI command allowing administrators to securely update their password after verifying current credentials, generating fresh Argon2id hashes with 128-bit cryptographic salts.
+
+---
+
 ## [1.0.1] - 2026-08-31
 
 ### Added
