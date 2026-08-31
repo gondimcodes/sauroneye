@@ -210,13 +210,13 @@ pub fn generate_pdf_report(
     let table_x_end = PAGE_W - MARGIN; // 195.0
 
     // Divisores verticais das colunas:
-    // Col 0: 15.0  a 43.0  (28mm - Timestamp)
-    // Col 1: 43.0  a 83.0  (40mm - Action/Severity)
-    // Col 2: 83.0  a 109.0 (26mm - Actor/IP)
-    // Col 3: 109.0 a 195.0 (86mm - Details / File Path)
-    let split_1 = MARGIN + 28.0; // 43.0
-    let split_2 = MARGIN + 68.0; // 83.0
-    let split_3 = MARGIN + 94.0; // 109.0
+    // Col 0: 15.0  a 40.0  (25mm - Timestamp: texto ocupa 22mm)
+    // Col 1: 40.0  a 71.0  (31mm - Action/Severity: texto ocupa até 28mm)
+    // Col 2: 71.0  a 113.0 (42mm - Actor/IP: acomoda IPv6 completo de 8 hexadecatetos ou usuario [IPv6])
+    // Col 3: 113.0 a 195.0 (82mm - Details / File Path: acomoda caminhos e hashes)
+    let split_1 = MARGIN + 25.0; // 40.0
+    let split_2 = MARGIN + 56.0; // 71.0
+    let split_3 = MARGIN + 98.0; // 113.0
     let col_splits = [split_1, split_2, split_3];
 
     // Padding de texto dentro das células
@@ -246,7 +246,8 @@ pub fn generate_pdf_report(
 
     writer.y = header_bottom_y;
 
-    const DETAILS_MAX_CHARS: usize = 62;
+    const ACTOR_MAX_CHARS: usize = 28;
+    const DETAILS_MAX_CHARS: usize = 58;
 
     for entry in logs {
         // Normaliza e limpa registros antigos do PURGE_LOGS se contiverem 'between X and Y'
@@ -258,12 +259,12 @@ pub fn generate_pdf_report(
         }
 
         let details_full = sanitize(&raw_details);
-        let chars: Vec<char> = details_full.chars().collect();
+        let d_chars: Vec<char> = details_full.chars().collect();
 
-        let line1: String = chars.iter().take(DETAILS_MAX_CHARS).collect();
-        let has_line2 = chars.len() > DETAILS_MAX_CHARS;
-        let line2: String = if has_line2 {
-            chars
+        let d_line1: String = d_chars.iter().take(DETAILS_MAX_CHARS).collect();
+        let d_has_line2 = d_chars.len() > DETAILS_MAX_CHARS;
+        let d_line2: String = if d_has_line2 {
+            d_chars
                 .iter()
                 .skip(DETAILS_MAX_CHARS)
                 .take(DETAILS_MAX_CHARS)
@@ -272,7 +273,34 @@ pub fn generate_pdf_report(
             String::new()
         };
 
-        let row_height = if has_line2 { 8.5 } else { 5.5 };
+        let actor_clean = sanitize(&entry.actor);
+        let actor_formatted = if actor_clean.contains(" [") && actor_clean.ends_with(']') {
+            actor_clean
+        } else if let Some((user, ip)) = actor_clean.split_once(":::") {
+            format!("{} [::{}]", user, ip)
+        } else if let Some((user, ip)) = actor_clean.split_once(':') {
+            format!("{} [{}]", user, ip)
+        } else if actor_clean.contains('.') || actor_clean.contains(':') {
+            format!("[{}]", actor_clean)
+        } else {
+            actor_clean
+        };
+
+        let a_chars: Vec<char> = actor_formatted.chars().collect();
+        let a_line1: String = a_chars.iter().take(ACTOR_MAX_CHARS).collect();
+        let a_has_line2 = a_chars.len() > ACTOR_MAX_CHARS;
+        let a_line2: String = if a_has_line2 {
+            a_chars
+                .iter()
+                .skip(ACTOR_MAX_CHARS)
+                .take(ACTOR_MAX_CHARS)
+                .collect()
+        } else {
+            String::new()
+        };
+
+        let has_multiline = d_has_line2 || a_has_line2;
+        let row_height = if has_multiline { 8.5 } else { 5.5 };
 
         // Garante espaço para a linha da tabela e redesenha o cabeçalho se pular de página
         if writer.y - row_height < (MARGIN + 10.0) {
@@ -306,28 +334,21 @@ pub fn generate_pdf_report(
             .map(|d: DateTime<Utc>| d.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default();
         let action_clean = sanitize(&entry.action);
-        let actor_clean = sanitize(&entry.actor);
-        let actor_formatted = if actor_clean.contains(" [") && actor_clean.ends_with(']') {
-            actor_clean
-        } else if let Some((user, ip)) = actor_clean.split_once(":::") {
-            format!("{} [::{}]", user, ip)
-        } else if let Some((user, ip)) = actor_clean.split_once(':') {
-            format!("{} [{}]", user, ip)
-        } else if actor_clean.contains('.') || actor_clean.contains(':') {
-            format!("[{}]", actor_clean)
-        } else {
-            actor_clean
-        };
 
         writer.y = row_top_y - 4.0;
         writer.text_at(&ts_str, 6.8, col_ts_text, false);
         writer.text_at(&action_clean, 6.8, col_action_text, false);
-        writer.text_at(&actor_formatted, 6.8, col_actor_text, false);
-        writer.text_at(&line1, 6.8, col_details_text, false);
+        writer.text_at(&a_line1, 6.8, col_actor_text, false);
+        writer.text_at(&d_line1, 6.8, col_details_text, false);
 
-        if has_line2 {
+        if has_multiline {
             writer.y = row_top_y - 7.5;
-            writer.text_at(&line2, 6.8, col_details_text, false);
+            if a_has_line2 {
+                writer.text_at(&a_line2, 6.8, col_actor_text, false);
+            }
+            if d_has_line2 {
+                writer.text_at(&d_line2, 6.8, col_details_text, false);
+            }
         }
 
         writer.y = row_bottom_y;
