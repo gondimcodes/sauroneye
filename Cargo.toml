@@ -1,6 +1,6 @@
 [package]
 name = "sauroneye"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 authors = ["SauronEye Team"]
 description = "High-Performance File Integrity Monitoring, Auth Auditing, and RCE/Intrusion Sentinel Daemon in Rust"

@@ -115,6 +115,12 @@ forbidden_children = [
     "/usr/bin/ncat",
     "/usr/bin/socat"
 ]
+# Whitelist of legitimate substrings/patterns in child commands (e.g. Kong/OpenResty/Supabase healthchecks)
+allowed_cmd_patterns = [
+    # "kong.cmd.init",
+    # "KONG_LUA_PATH_OVERRIDE",
+    # "resty"
+]
 
 [notifications.telegram]
 enabled = false

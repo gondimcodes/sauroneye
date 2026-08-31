@@ -184,18 +184,17 @@ impl FimEngine {
         // 2. Proteção Nativa e Inviolável da base de dados e diretório interno (/var/lib/sauroneye)
         // Independentemente do que estiver ou não configurado no config.toml
         let internal_data_dir = Path::new("/var/lib/sauroneye");
-        if internal_data_dir.exists() {
-            if !self
+        if internal_data_dir.exists()
+            && !self
                 .config
                 .include_paths
                 .contains(&internal_data_dir.to_path_buf())
-            {
-                info!(
-                    "Registering native immutable FIM watch on daemon directory: {}",
-                    internal_data_dir.display()
-                );
-                let _ = watcher.watch(internal_data_dir, RecursiveMode::Recursive);
-            }
+        {
+            info!(
+                "Registering native immutable FIM watch on daemon directory: {}",
+                internal_data_dir.display()
+            );
+            let _ = watcher.watch(internal_data_dir, RecursiveMode::Recursive);
         }
         // Monitora também o diretório pai /var/lib para capturar se a própria pasta /var/lib/sauroneye for movida ou deletada
         let var_lib = Path::new("/var/lib");
@@ -441,15 +440,13 @@ impl FimEngine {
             }
             EventKind::Modify(_) | EventKind::Any => {
                 for path in event.paths {
-                    if !Self::check_excluded(&path, active_exclusions) {
-                        if path.is_file() {
-                            if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
-                                let fim_ev = FimEvent::Modified {
-                                    path: path.clone(),
-                                    new_fingerprint: fp,
-                                };
-                                let _ = event_tx.blocking_send(fim_ev);
-                            }
+                    if !Self::check_excluded(&path, active_exclusions) && path.is_file() {
+                        if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
+                            let fim_ev = FimEvent::Modified {
+                                path: path.clone(),
+                                new_fingerprint: fp,
+                            };
+                            let _ = event_tx.blocking_send(fim_ev);
                         }
                     }
                 }
@@ -491,8 +488,7 @@ impl FimEngine {
                 if path_str.contains(substr) {
                     return true;
                 }
-            } else if pattern.starts_with('*') {
-                let ext = &pattern[1..];
+            } else if let Some(ext) = pattern.strip_prefix('*') {
                 if path_str.ends_with(ext) {
                     return true;
                 }

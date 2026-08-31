@@ -7,6 +7,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.3] - 2026-08-31
+
+### Adicionado
+- **Whitelist Granular de Comandos RCE (`allowed_cmd_patterns`)**: Implementado suporte a padrões e assinaturas personalizadas no `[rce_detector]` para autorizar comandos filhos legítimos (como verificações de saúde do Kong Gateway / OpenResty no ecossistema Supabase), mantendo proteção ativa em tempo real contra webshells e injeções maliciosas.
+
+---
+
 ## [1.0.2] - 2026-08-31
 
 ### Adicionado

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.3] - 2026-08-31
+
+### Added
+- **RCE Whitelist Granular Patterns (`allowed_cmd_patterns`)**: Introduced customizable substring whitelist matching in `[rce_detector]` to allow legitimate child processes and internal scripts (e.g. Kong Gateway / OpenResty healthchecks in Supabase environments) while preserving real-time alerting on malicious shells and webshell intrusions.
+
+---
+
 ## [1.0.2] - 2026-08-31
 
 ### Added

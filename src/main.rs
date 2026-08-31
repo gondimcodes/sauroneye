@@ -12,7 +12,7 @@ mod report;
 
 use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -345,8 +345,8 @@ fn handle_logs(
     );
     println!("{:-<120}", "");
     println!(
-        "{:<20} | {:<25} | {:<20} | {}",
-        "Timestamp (UTC)", "Action", "Actor / IP", "Details"
+        "{:<20} | {:<25} | {:<20} | Details",
+        "Timestamp (UTC)", "Action", "Actor / IP"
     );
     println!("{:-<120}", "");
 
@@ -383,7 +383,7 @@ fn handle_logs(
 async fn handle_report(
     config: &Config,
     db: &Database,
-    output: &PathBuf,
+    output: &Path,
     from: &str,
     to: &str,
     email_dest: Option<&str>,

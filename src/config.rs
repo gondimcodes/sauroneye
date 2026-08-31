@@ -122,6 +122,8 @@ pub struct RceDetectorConfig {
     pub protected_services: Vec<String>,
     #[serde(default = "default_forbidden_children")]
     pub forbidden_children: Vec<String>,
+    #[serde(default)]
+    pub allowed_cmd_patterns: Vec<String>,
 }
 
 impl Default for RceDetectorConfig {
@@ -130,6 +132,7 @@ impl Default for RceDetectorConfig {
             enabled: true,
             protected_services: default_protected_services(),
             forbidden_children: default_forbidden_children(),
+            allowed_cmd_patterns: Vec::new(),
         }
     }
 }

