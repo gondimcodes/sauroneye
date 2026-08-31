@@ -156,8 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             handle_run(config, db, dispatcher).await?;
         }
         Commands::Logs { from, to, purge } => {
-            handle_logs(&config, &db, &from, &to, purge)?;
+            handle_logs(&config, &db, &dispatcher, &from, &to, purge).await?;
         }
+
         Commands::Report {
             output,
             from,
@@ -336,9 +337,10 @@ fn handle_status(
     Ok(())
 }
 
-fn handle_logs(
+async fn handle_logs(
     config: &Config,
     db: &Database,
+    dispatcher: &Arc<AlertDispatcher>,
     from: &str,
     to: &str,
     purge: bool,
@@ -358,8 +360,21 @@ fn handle_logs(
         db.record_audit_log(
             "PURGE_LOGS",
             "admin",
-            &format!("Purged {} log records", count),
+            &format!("Purged {} log records between {} and {}", count, from, to),
         )?;
+
+        let alert = AlertMessage::new(
+            &config.general.hostname,
+            "Forensic Audit Logs Purged",
+            AlertSeverity::Warning,
+            &format!(
+                "An administrator purged {} audit log entries from the database.\nInterval: {} to {}",
+                count, from, to
+            ),
+        );
+        dispatcher.dispatch(alert).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
         return Ok(());
     }
 
