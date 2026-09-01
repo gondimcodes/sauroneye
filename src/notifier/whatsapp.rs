@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use reqwest::Client;
-use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::config::WhatsappConfig;
+use crate::notifier::shared::{BreakerDecision, CircuitBreaker};
 use crate::notifier::{AlertMessage, AlertSeverity, Notifier};
 
 pub struct WhatsappNotifier {
@@ -34,94 +34,55 @@ impl WhatsappNotifier {
             // WhatsApp rate limiting cadence (1.2s minimum between consecutive requests)
             let min_interval = Duration::from_millis(1200);
 
-            // Circuit Breaker Sliding Window: max 10 alerts per 60 seconds
-            const MAX_ALERTS_PER_MINUTE: usize = 10;
-            let window_duration = Duration::from_secs(60);
-            let mut recent_timestamps: VecDeque<Instant> = VecDeque::new();
-            let mut circuit_breaker_active = false;
-            let mut suppressed_count = 0usize;
+            // QC-09: CircuitBreaker replaces the previous inline VecDeque sliding-window logic
+            let mut breaker = CircuitBreaker::new(10); // max 10 alerts/min
 
             while let Some(alert) = rx.recv().await {
-                let now = Instant::now();
-
-                // Evict entries older than 60s
-                while let Some(&front) = recent_timestamps.front() {
-                    if now.duration_since(front) > window_duration {
-                        recent_timestamps.pop_front();
-                    } else {
-                        break;
-                    }
-                }
-
-                // Check Circuit Breaker threshold
-                if recent_timestamps.len() >= MAX_ALERTS_PER_MINUTE {
-                    suppressed_count += 1;
-                    if !circuit_breaker_active {
-                        circuit_breaker_active = true;
-                        warn!(
-                            "WhatsApp Circuit Breaker TRIGGERED (threshold: {} alerts/min reached). Throttling outgoing WhatsApp messages.",
-                            MAX_ALERTS_PER_MINUTE
-                        );
-
-                        let warning_msg = AlertMessage::with_timezone(
-                            &alert.host,
-                            "WhatsApp Alert Throttling Activated (Anti-Flood Circuit Breaker)",
-                            AlertSeverity::Warning,
-                            &format!(
-                                "High frequency of security events detected (exceeded {} alerts/min).\n\n\
+                match breaker.check() {
+                    BreakerDecision::Suppress { first_open } => {
+                        if first_open {
+                            warn!(
+                                "WhatsApp Circuit Breaker TRIGGERED (threshold: 10 alerts/min reached). Throttling outgoing WhatsApp messages."
+                            );
+                            let warning_msg = AlertMessage::with_timezone(
+                                &alert.host,
+                                "WhatsApp Alert Throttling Activated (Anti-Flood Circuit Breaker)",
+                                AlertSeverity::Warning,
+                                "High frequency of security events detected (exceeded 10 alerts/min).\n\n\
                                 🛡️ WhatsApp messaging is temporarily throttled to protect your account against anti-spam bans.\n\
                                 📋 100% of events continue being audited in SQLite and forensic PDF reports.",
-                                MAX_ALERTS_PER_MINUTE
-                            ),
-                            true,
-                        );
-
-                        Self::dispatch_raw(
-                            &client,
-                            &config,
-                            &warning_msg.format_text(),
-                            &warning_msg.title,
-                        )
-                        .await;
+                                true,
+                            );
+                            Self::dispatch_raw(&client, &config, &warning_msg.format_text(), &warning_msg.title).await;
+                        }
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
                     }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
+                    BreakerDecision::JustRecovered { suppressed } => {
+                        if suppressed > 0 {
+                            info!(
+                                "WhatsApp Circuit Breaker RESET. Suppressed {} alerts during burst window.",
+                                suppressed
+                            );
+                            let recovery_msg = AlertMessage::with_timezone(
+                                &alert.host,
+                                "WhatsApp Alerting Resumed",
+                                AlertSeverity::Info,
+                                &format!(
+                                    "Traffic normalized. {} alerts were suppressed on WhatsApp during the burst and securely preserved in forensic database.",
+                                    suppressed
+                                ),
+                                true,
+                            );
+                            Self::dispatch_raw(&client, &config, &recovery_msg.format_text(), &recovery_msg.title).await;
+                        }
+                    }
+                    BreakerDecision::Pass => {}
                 }
 
-                // When volume is within limits, if it was active, notify recovery
-                if circuit_breaker_active {
-                    circuit_breaker_active = false;
-                    if suppressed_count > 0 {
-                        info!(
-                            "WhatsApp Circuit Breaker RESET. Suppressed {} alerts during burst window.",
-                            suppressed_count
-                        );
-                        let recovery_msg = AlertMessage::with_timezone(
-                            &alert.host,
-                            "WhatsApp Alerting Resumed",
-                            AlertSeverity::Info,
-                            &format!(
-                                "Traffic normalized. {} alerts were suppressed on WhatsApp during the burst and securely preserved in forensic database.",
-                                suppressed_count
-                            ),
-                            true,
-                        );
-                        Self::dispatch_raw(
-                            &client,
-                            &config,
-                            &recovery_msg.format_text(),
-                            &recovery_msg.title,
-                        )
-                        .await;
-                        suppressed_count = 0;
-                    }
-                }
-
-                recent_timestamps.push_back(Instant::now());
-
+                breaker.record_sent();
                 let message_text = alert.format_text();
                 Self::dispatch_raw(&client, &config, &message_text, &alert.title).await;
-
                 tokio::time::sleep(min_interval).await;
             }
         });
@@ -132,14 +93,16 @@ impl WhatsappNotifier {
         }
     }
 
+    /// WhatsApp uses multipart/form-data with optional API key headers,
+    /// so we keep a dedicated dispatch function rather than using `retry_http_post`.
     async fn dispatch_raw(
         client: &Client,
         config: &WhatsappConfig,
         message_text: &str,
         alert_title: &str,
     ) {
-        let mut attempts = 0;
-        let max_attempts = 3;
+        let max_attempts = 3u32;
+        let mut attempts = 0u32;
 
         while attempts < max_attempts {
             attempts += 1;

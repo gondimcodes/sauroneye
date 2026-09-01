@@ -30,12 +30,19 @@ impl Analyzer {
         self.pkg_checker.is_package_manager_locked()
     }
 
+    /// Analyzes a file modification to determine if it's a legitimate package manager update
+    /// or unauthorized tampering.
+    ///
+    /// `ip_origin` must be resolved by the caller (ideally once per poll cycle via `IpSessionCache`)
+    /// to avoid redundant `/proc` scans. PERF-07: the previous internal call to
+    /// `get_active_logged_in_ips()` has been removed.
     pub fn analyze_modification(
         &self,
         path: &Path,
         author_pid: Option<u32>,
         old_fp: Option<&FileFingerprint>,
         new_fp: &FileFingerprint,
+        ip_origin: &str,
     ) -> AnalysisResult {
         let (proc_name, proc_cmdline) = if let Some(pid) = author_pid {
             let name =
@@ -65,18 +72,6 @@ impl Analyzer {
             false
         };
 
-        // Correlate active logged-in IP addresses
-        let active_sessions = ProcessInspector::get_active_logged_in_ips();
-        let ip_origin_str = if !active_sessions.is_empty() {
-            active_sessions
-                .iter()
-                .map(|s| s.ip_origin.clone())
-                .collect::<Vec<String>>()
-                .join(", ")
-        } else {
-            "local console / service".to_string()
-        };
-
         // If package manager is actively running on the system, treat changes as legitimate system updates
         if is_pkg_running || is_pkg_mgr_process {
             return AnalysisResult {
@@ -99,7 +94,7 @@ impl Analyzer {
             details: format!(
                 "CRITICAL ALERT: File modification outside package manager!\n\nFile: {}\nActive User Origin IP(s): {}\nAuthor Process: {} (PID: {})\nAuthor Command: {}\nPrevious Hash: {}\nNew Hash: {}",
                 path.display(),
-                ip_origin_str,
+                ip_origin,
                 proc_name,
                 author_pid.unwrap_or(0),
                 proc_cmdline,

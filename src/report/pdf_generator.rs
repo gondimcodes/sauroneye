@@ -46,6 +46,9 @@ impl PdfReportWriter {
         self.y = PAGE_H - MARGIN;
     }
 
+    /// Checks if there is enough vertical space remaining and advances to a new page if needed.
+    /// Kept for future multi-section/multi-page PDF report layouts.
+    #[allow(dead_code)]
     fn ensure_space(&mut self, needed_mm: f32) {
         if self.y - needed_mm < (MARGIN + 12.0) {
             self.new_page();

@@ -733,12 +733,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glob"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
-
-[[package]]
 name = "glyph-names"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1861,9 +1855,7 @@ dependencies = [
  "blake3",
  "chrono",
  "clap",
- "glob",
  "lettre",
- "libc",
  "nix",
  "notify",
  "printpdf",

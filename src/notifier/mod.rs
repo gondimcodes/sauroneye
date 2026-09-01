@@ -1,12 +1,15 @@
 pub mod discord;
 pub mod email;
 pub mod msteams;
+pub mod shared;
 pub mod telegram;
 pub mod whatsapp;
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::error;
+
 
 pub use discord::DiscordNotifier;
 pub use email::SmtpNotifier;
@@ -100,14 +103,14 @@ pub trait Notifier: Send + Sync {
 
 pub struct AlertDispatcher {
     notifiers: Vec<Arc<dyn Notifier>>,
-    recent_dispatches: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    recent_dispatches: Mutex<std::collections::HashMap<String, std::time::Instant>>,
 }
 
 impl AlertDispatcher {
     pub fn new() -> Self {
         Self {
             notifiers: Vec::new(),
-            recent_dispatches: std::sync::Mutex::new(std::collections::HashMap::new()),
+            recent_dispatches: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -121,17 +124,16 @@ impl AlertDispatcher {
         let dedup_key = format!("{}::{}", alert.title, alert.details);
         let now = std::time::Instant::now();
         {
-            if let Ok(mut map) = self.recent_dispatches.lock() {
-                // Remove entradas antigas para não acumular memória
-                map.retain(|_, v| now.duration_since(*v) < std::time::Duration::from_secs(10));
+            let mut map = self.recent_dispatches.lock().await;
+            // Remove entradas antigas para não acumular memória
+            map.retain(|_, v| now.duration_since(*v) < std::time::Duration::from_secs(10));
 
-                if let Some(last_time) = map.get(&dedup_key) {
-                    if now.duration_since(*last_time) < std::time::Duration::from_millis(2500) {
-                        return;
-                    }
+            if let Some(last_time) = map.get(&dedup_key) {
+                if now.duration_since(*last_time) < std::time::Duration::from_millis(2500) {
+                    return;
                 }
-                map.insert(dedup_key, now);
             }
+            map.insert(dedup_key, now);
         }
 
         for notifier in &self.notifiers {

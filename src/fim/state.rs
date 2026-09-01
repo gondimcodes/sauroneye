@@ -12,8 +12,6 @@ pub struct FileFingerprint {
     pub permissions: u32,
     pub hash_algorithm: String,
     pub hash_value: String,
-    pub package_name: Option<String>,
-    pub package_version: Option<String>,
     pub last_verified: i64,
 }
 
@@ -38,8 +36,6 @@ impl FileFingerprint {
             permissions,
             hash_algorithm: algorithm.as_str().to_string(),
             hash_value,
-            package_name: None,
-            package_version: None,
             last_verified: now,
         })
     }

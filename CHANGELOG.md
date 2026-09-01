@@ -9,8 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - 1.0.7
 
+> ⚠️ **BREAKING CHANGE — Database Schema**: The `file_fingerprints` table no longer contains the
+> `package_name` and `package_version` columns. These fields were YAGNI (never populated, never read).
+> **The SQLite database must be deleted and recreated** (`rm /var/lib/sauroneye/sauron.db` then
+> `sauroneye init`) before running this version. All forensic audit logs in the `audit_logs` table
+> are unaffected by this schema change.
+
+### Security
+- **[SEG-01] Log Injection Prevention**: Sanitize `raw_message` field in `pam_watcher.rs` — control
+  characters (newlines, tabs, CR) embedded in crafted usernames are now replaced with spaces before
+  storage and alerting.
+- **[SEG-02] Path Traversal Bypass Fix in FIM Exclusion Engine**: `check_excluded()` previously used
+  `path_str.contains(pattern)` for relative patterns, which could be exploited to suppress monitoring
+  of a target path by embedding an excluded directory name as a substring (e.g., pattern `tmp` would
+  match `/var/www/upload_tmp/backdoor.php`). Now uses `path.starts_with()` for absolute patterns and
+  component-level matching for relative patterns.
+- **[SEG-04] SQLite Mutex Poison Recovery**: All `Mutex<Connection>` lock acquisitions now use
+  `unwrap_or_else(|p| p.into_inner())` via the `lock_conn!` macro, preventing a thread panic from
+  permanently deadlocking the entire daemon.
+- **[SEG-05] Sensitive Field Masking in Logs**: Telegram `chat_id` is now masked (shows only last 4
+  digits) in startup logs. WhatsApp `endpoint_url` and `recipient_number` are no longer logged at all,
+  preventing exposure of sensitive configuration values in syslog/journald.
+- **[RUST-05] Atomic Check-and-Insert in RCE Detector**: Eliminated TOCTOU race in
+  `process_tree.rs` where `alerted_pids` was locked twice (once to check, once to insert). Now a
+  single lock acquisition handles both operations atomically.
+- **[RUST-04] `tokio::sync::Mutex` for `AlertDispatcher`**: The `recent_dispatches` deduplication
+  map in the async `dispatch()` method was guarded by `std::sync::Mutex`, which blocks the tokio
+  scheduler under contention. Replaced with `tokio::sync::Mutex` with `.await`.
+
+### Performance
+- **[PERF-01] `IpSessionCache` — Eliminate Redundant `/proc` Scans**: Added `IpSessionCache` with
+  a 3-second TTL in `analyzer/process_context.rs`. The FIM event loop previously called
+  `get_active_logged_in_ips()` (which reads every `/proc/<pid>/environ` and `/proc/net/tcp`) once
+  per FIM event — up to 500+ extra syscalls per second during bursts. Now resolved once per poll
+  cycle at most.
+- **[PERF-02] Debounce Map Bounded Growth**: The `recent_alert_debounce` HashMap is now purged
+  of entries older than 30s whenever it exceeds 1000 entries, preventing unbounded memory growth
+  during high-event-rate periods.
+- **[PERF-04] FIM Event Channel Buffer 512 → 2048**: Increased the MPSC channel buffer to handle
+  burst events (e.g., `rsync`, `chmod -R`) without blocking the inotify watcher thread.
+- **[PERF-06] Cached SMTP Transport**: `SmtpNotifier` now builds the `AsyncSmtpTransport` once at
+  construction time instead of per-alert, eliminating TLS handshake overhead on every email sent.
+- **[PERF-07] Analyzer `ip_origin` Decoupled**: `analyze_modification()` now accepts `ip_origin: &str`
+  as a parameter instead of calling `get_active_logged_in_ips()` internally, eliminating a hidden
+  double `/proc` scan per tampered file.
+
+### Refactoring / Code Quality
+- **[QC-01] Removed `#![allow(dead_code)]`**: The global suppressor is gone. Remaining dead code
+  items are annotated with targeted `#[allow(dead_code)]` and documented rationale.
+- **[QC-02/ARQ-01] `MonitorState` Struct**: Extracted the 5 scattered mutable local variables in
+  `handle_run()` into a `MonitorState` struct with helper methods (`purge_stale_debounce`). Reduces
+  cognitive load and is the foundation for further decomposition.
+- **[QC-09/10] Shared Notifier Utilities (`notifier/shared.rs`)**: The `CircuitBreaker` sliding-window
+  rate limiter and `retry_http_post` retry helper were copy-pasted across `discord.rs`, `msteams.rs`,
+  and `whatsapp.rs`. Extracted into a single shared module, eliminating ~150 lines of duplication.
+- **[QC-03] Unified IP Context Resolution**: All FIM event handlers now share the single
+  `ip_origin_str` computed once per poll cycle — previously each handler computed its own copy.
+- Removed unused `glob` and `libc` dependencies from `Cargo.toml`.
+- Removed unused `Clone` derive from `FimEvent` in `engine.rs`.
+- Renamed `Xxh3` → `Xxh64` in `hasher.rs` for technical precision (the algorithm is XXH64, not XXH3).
+- Removed YAGNI columns `package_name` and `package_version` from `FileFingerprint` and the SQLite
+  schema (these fields were never populated or read).
+- Increased minimum admin password length from 8 to 12 characters in `cli/auth_prompt.rs`.
+- Updated MS Teams Adaptive Card schema URL from `http://` to `https://`.
+
 ### Fixed
-- **Package Manager Detection Rewritten with `flock()` Advisory Lock**: Replaced the brittle `/proc/*/comm` process-name scanning approach with a kernel-level non-blocking exclusive `flock()` test on the distro's canonical lock files (`/var/lib/dpkg/lock-frontend`, `/var/lib/rpm/.rpm.lock`, `/var/lib/pacman/db.lck`, `/lib/apk/db/lock`, `/var/lib/zypp/zypp.lock`). This is the identical mechanism used by `apt`, `dpkg`, `dnf`, `pacman`, and `apk` themselves to detect concurrent execution. The previous approach was susceptible to permanently running system daemons (e.g. `packagekitd`, `apt-cacher-ng`) whose process names partially matched the detection list, causing all FIM alerts to be silently suppressed. The new approach is fully deterministic, universal across all package managers and distributions, and immune to process-name collisions.
+- **Package Manager Detection Rewritten with `flock()` Advisory Lock**: Replaced the brittle
+  `/proc/*/comm` process-name scanning with a kernel-level non-blocking exclusive `flock()` test on
+  distro canonical lock files. The previous approach caused all FIM alerts to be silently suppressed
+  when daemons like `packagekitd` were running.
 
 ---
 

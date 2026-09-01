@@ -45,12 +45,6 @@ impl RceDetector {
             if let Ok(pid) = name_str.parse::<u32>() {
                 active_pids.insert(pid);
 
-                // Evita re-alertar sobre o mesmo PID enquanto ele continuar em execução (ex: sleep longo)
-                if let Ok(alerted) = self.alerted_pids.lock() {
-                    if alerted.contains(&pid) {
-                        continue;
-                    }
-                }
                 if let Some(ppid) = ProcessInspector::get_parent_pid(pid) {
                     let parent_comm = ProcessInspector::get_process_name(ppid);
                     let parent_exe = ProcessInspector::get_process_exe(ppid);
@@ -92,16 +86,21 @@ impl RceDetector {
                                 })
                                 .unwrap_or_else(|| format!("PID:{}", ppid));
 
+                            // RUST-05: acquire lock once, check and insert atomically to eliminate
+                            // internal TOCTOU between separate check and insert lock acquisitions.
+                            if let Ok(mut alerted) = self.alerted_pids.lock() {
+                                if alerted.contains(&pid) {
+                                    continue;
+                                }
+                                alerted.insert(pid);
+                            }
+
                             alerts.push(RceAlert {
                                 parent_service: parent_name,
                                 parent_pid: ppid,
                                 child_cmd,
                                 child_pid: pid,
                             });
-
-                            if let Ok(mut alerted) = self.alerted_pids.lock() {
-                                alerted.insert(pid);
-                            }
                         }
                     }
                 }

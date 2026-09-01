@@ -10,7 +10,7 @@ use crate::config::{DistroExclusionsConfig, FimConfig};
 use crate::fim::hasher::HashAlgorithm;
 use crate::fim::state::FileFingerprint;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum FimEvent {
     Modified {
         path: PathBuf,
@@ -29,6 +29,9 @@ pub enum FimEvent {
         uid: u32,
         gid: u32,
     },
+    /// Emitted when a monitored directory is removed. Not yet dispatched as an alert
+    /// (kept for completeness of the inotify event model).
+    #[allow(dead_code)]
     DirectoryDeleted {
         path: PathBuf,
     },
@@ -57,6 +60,8 @@ pub enum FimEvent {
 
 pub struct FimEngine {
     config: FimConfig,
+    /// Kept for distro-specific exclusion extension (not yet fully wired)
+    #[allow(dead_code)]
     distro_exclusions: DistroExclusionsConfig,
     active_exclusions: Vec<String>,
     hash_algo: HashAlgorithm,
@@ -508,26 +513,41 @@ impl FimEngine {
         // 2. Custom user and distro exclusions
         for pattern in exclude_patterns {
             if pattern.starts_with('*') && pattern.ends_with('*') && pattern.len() > 2 {
+                // *substring* — intentional anywhere-match glob
                 let substr = &pattern[1..pattern.len() - 1];
                 if path_str.contains(substr) {
                     return true;
                 }
             } else if let Some(ext) = pattern.strip_prefix('*') {
+                // *.ext — extension match
                 if path_str.ends_with(ext) {
                     return true;
                 }
             } else if pattern.ends_with('*') {
+                // prefix* — filename prefix glob
                 let prefix = &pattern[..pattern.len() - 1];
                 if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
                     if file_name.starts_with(prefix) {
                         return true;
                     }
                 }
-                if path_str.ends_with(prefix) || path_str.contains(prefix) {
+            } else if pattern.starts_with('/') {
+                // SEG-02: absolute path pattern — use starts_with for prefix match,
+                // not .contains() which could match subdirectory names embedded in other paths.
+                // E.g.: pattern "/tmp" must NOT match "/var/www/upload_tmp/backdoor.php"
+                if path.starts_with(pattern) {
                     return true;
                 }
-            } else if path_str.ends_with(pattern) || path_str.contains(pattern) {
-                return true;
+            } else {
+                // Relative pattern — match against path components only, not arbitrary substrings.
+                // This prevents 'tmp' from matching '/var/www/upload_tmp/file'.
+                if path.components().any(|c| c.as_os_str().to_string_lossy() == pattern.as_str()) {
+                    return true;
+                }
+                // Also allow exact filename match
+                if path.file_name().and_then(|n| n.to_str()) == Some(pattern.as_str()) {
+                    return true;
+                }
             }
         }
         false

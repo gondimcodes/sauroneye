@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS file_fingerprints (
     permissions INTEGER NOT NULL,
     hash_algorithm TEXT NOT NULL,
     hash_value TEXT NOT NULL,
-    package_name TEXT,
-    package_version TEXT,
     last_verified INTEGER NOT NULL
 ) WITHOUT ROWID;
 

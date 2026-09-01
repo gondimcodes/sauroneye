@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 
 mod analyzer;
 mod auth;
@@ -101,7 +100,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut dispatcher = AlertDispatcher::new();
     if let Some(ref tg) = config.notifications.telegram {
         if tg.enabled {
-            info!("Telegram notifier initialized (chat_id: {})", tg.chat_id);
+            // SEG-05: mask chat_id to avoid exposing the full value in syslog/journald
+            let masked_id = if tg.chat_id.len() > 4 {
+                format!("****{}", &tg.chat_id[tg.chat_id.len() - 4..])
+            } else {
+                "****".to_string()
+            };
+            info!("Telegram notifier initialized (chat_id: {})", masked_id);
             dispatcher.add_notifier(Arc::new(TelegramNotifier::new(tg.clone())));
         } else {
             info!("Telegram notifier is disabled in configuration.");
@@ -109,10 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if let Some(ref wa) = config.notifications.whatsapp {
         if wa.enabled {
-            info!(
-                "WhatsApp notifier initialized (endpoint: {}, recipient: {})",
-                wa.endpoint_url, wa.recipient_number
-            );
+            // SEG-05: log only that the notifier is active, without exposing the endpoint or recipient
+            info!("WhatsApp notifier initialized (recipient configured).");
             dispatcher.add_notifier(Arc::new(WhatsappNotifier::new(wa.clone())));
         } else {
             info!("WhatsApp notifier is disabled in configuration.");
@@ -523,6 +526,45 @@ async fn handle_report(
     Ok(())
 }
 
+/// Encapsulates all mutable state used across FIM event handlers in the main daemon loop.
+///
+/// Previously this state was scattered as 4 separate `let mut` bindings inside `handle_run()`.
+/// Grouping them into a struct makes ownership explicit and enables future extraction of
+/// individual event-handler functions without borrow-checker friction.
+struct MonitorState {
+    /// Last-known permissions (mode & 0o777) for all monitored paths
+    known_permissions: std::collections::HashMap<std::path::PathBuf, u32>,
+    /// Last-known (uid, gid) ownership for all monitored paths
+    known_ownership: std::collections::HashMap<std::path::PathBuf, (u32, u32)>,
+    /// Set of directory paths known at baseline — used to detect new directory creation
+    known_directories: std::collections::HashSet<std::path::PathBuf>,
+    /// Per-event deduplication map: key → last alert time
+    recent_alert_debounce: std::collections::HashMap<String, std::time::Instant>,
+    /// Cached active SSH session IPs — refreshed at most every 3s (PERF-01)
+    ip_cache: crate::analyzer::process_context::IpSessionCache,
+}
+
+impl MonitorState {
+    fn new() -> Self {
+        Self {
+            known_permissions: std::collections::HashMap::new(),
+            known_ownership: std::collections::HashMap::new(),
+            known_directories: std::collections::HashSet::new(),
+            recent_alert_debounce: std::collections::HashMap::new(),
+            ip_cache: crate::analyzer::process_context::IpSessionCache::new(),
+        }
+    }
+
+    /// Purge the debounce map when it grows large to prevent unbounded HashMap growth (PERF-02).
+    fn purge_stale_debounce(&mut self) {
+        if self.recent_alert_debounce.len() > 1000 {
+            let now = std::time::Instant::now();
+            self.recent_alert_debounce
+                .retain(|_, t| now.duration_since(*t) < std::time::Duration::from_secs(30));
+        }
+    }
+}
+
 async fn handle_run(
     config: Config,
     db: Database,
@@ -560,14 +602,7 @@ async fn handle_run(
     // Pré-carrega o baseline de permissões e ownership de todos os caminhos monitorados
     // ANTES de iniciar o watcher para evitar race condition.
     // Arquivos/dirs que aparecerem DEPOIS do watcher iniciar são genuinamente novos.
-    let mut known_permissions: std::collections::HashMap<std::path::PathBuf, u32> =
-        std::collections::HashMap::new();
-    let mut known_ownership: std::collections::HashMap<std::path::PathBuf, (u32, u32)> =
-        std::collections::HashMap::new();
-    let mut known_directories: std::collections::HashSet<std::path::PathBuf> =
-        std::collections::HashSet::new();
-    let mut recent_alert_debounce: std::collections::HashMap<String, std::time::Instant> =
-        std::collections::HashMap::new();
+    let mut state = MonitorState::new();
 
     {
         use std::os::unix::fs::MetadataExt;
@@ -579,7 +614,7 @@ async fn handle_run(
 
         for root in &scan_roots {
             if root.is_dir() {
-                known_directories.insert(root.clone());
+                state.known_directories.insert(root.clone());
             }
             for entry in walkdir::WalkDir::new(root)
                 .into_iter()
@@ -587,18 +622,20 @@ async fn handle_run(
             {
                 let path = entry.path().to_path_buf();
                 if entry.file_type().is_dir() {
-                    known_directories.insert(path.clone());
+                    state.known_directories.insert(path.clone());
                 }
                 if let Ok(meta) = std::fs::metadata(&path) {
-                    known_permissions.insert(path.clone(), meta.mode() & 0o777);
-                    known_ownership.insert(path, (meta.uid(), meta.gid()));
+                    state.known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                    state.known_ownership.insert(path, (meta.uid(), meta.gid()));
                 }
             }
         }
     }
 
     // Inicia o watcher em tempo real APÓS baseline capturado
-    let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(512);
+    // PERF-04: buffer increased from 512 to 2048 to handle burst events
+    // (e.g. rsync, chmod -R) without blocking the watcher thread
+    let (fim_tx, mut fim_rx) = tokio::sync::mpsc::channel::<crate::fim::engine::FimEvent>(2048);
     let _watcher = fim_engine.start_watcher(fim_tx)?;
 
     // Captura de sinais do sistema operacional (SIGINT / SIGTERM)
@@ -639,6 +676,12 @@ async fn handle_run(
 
 
             _ = sleep(poll_interval) => {
+                // PERF-01/QC-03: resolve IP context once per cycle, shared across all FIM handlers
+                let ip_origin_str = state.ip_cache.get_ip_context_string();
+
+                // PERF-02: purge debounce map if it grows large (avoids unbounded HashMap growth)
+                state.purge_stale_debounce();
+
                 // 1. Process Real-Time FIM Events
                 while let Ok(fim_event) = fim_rx.try_recv() {
                     match fim_event {
@@ -653,15 +696,15 @@ async fn handle_run(
                             if is_different {
                                 let key = format!("modified:{}:{}", path.display(), new_fingerprint.hash_value);
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         let _ = db.save_fingerprints_batch(&[new_fingerprint]);
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let analysis = analyzer.analyze_modification(&path, None, old_fp.as_ref(), &new_fingerprint);
+                                let analysis = analyzer.analyze_modification(&path, None, old_fp.as_ref(), &new_fingerprint, &ip_origin_str);
 
                                 // Send alert only if it is tampering OR if user explicitly enabled notifications for legitimate package updates
                                 if !analysis.is_legitimate_update || config.package_manager.notify_legitimate_updates {
@@ -688,15 +731,15 @@ async fn handle_run(
                                 if old.hash_value != fingerprint.hash_value {
                                     let key = format!("modified:{}:{}", path.display(), fingerprint.hash_value);
                                     let now = std::time::Instant::now();
-                                    if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                         if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                             let _ = db.save_fingerprints_batch(&[fingerprint]);
                                             continue;
                                         }
                                     }
-                                    recent_alert_debounce.insert(key, now);
+                                    state.recent_alert_debounce.insert(key, now);
 
-                                    let analysis = analyzer.analyze_modification(&path, None, Some(old), &fingerprint);
+                                    let analysis = analyzer.analyze_modification(&path, None, Some(old), &fingerprint, &ip_origin_str);
                                     if !analysis.is_legitimate_update || config.package_manager.notify_legitimate_updates {
                                         let alert = AlertMessage::new(
                                             &config.general.hostname,
@@ -717,24 +760,14 @@ async fn handle_run(
                                 if !analyzer.is_package_manager_active() {
                                     let key = format!("created:{}", path.display());
                                     let now = std::time::Instant::now();
-                                    if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                    if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                         if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                             let _ = db.save_fingerprints_batch(&[fingerprint]);
                                             continue;
                                         }
                                     }
-                                    recent_alert_debounce.insert(key, now);
+                                    state.recent_alert_debounce.insert(key, now);
 
-                                    let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                    let ip_origin_str = if !active_sessions.is_empty() {
-                                        active_sessions
-                                            .iter()
-                                            .map(|s| s.ip_origin.clone())
-                                            .collect::<Vec<String>>()
-                                            .join(", ")
-                                    } else {
-                                        "local console / service".to_string()
-                                    };
 
                                     let alert = AlertMessage::new(
                                         &config.general.hostname,
@@ -763,31 +796,21 @@ async fn handle_run(
                             // eventos subsequentes de chmod/chown sejam comparados corretamente
                             use std::os::unix::fs::MetadataExt;
                             if let Ok(meta) = std::fs::metadata(&path) {
-                                known_permissions.insert(path.clone(), meta.mode() & 0o777);
-                                known_ownership.insert(path.clone(), (meta.uid(), meta.gid()));
+                                state.known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                                state.known_ownership.insert(path.clone(), (meta.uid(), meta.gid()));
                             }
                         }
                         crate::fim::engine::FimEvent::DirectoryCreated { path, permissions, uid, gid } => {
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("created_dir:{}", path.display());
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
@@ -811,35 +834,25 @@ async fn handle_run(
                             }
                             // Registra o novo dir nos state maps para que
                             // eventos subsequentes de chmod/chown sejam comparados corretamente
-                            known_directories.insert(path.clone());
-                            known_permissions.insert(path.clone(), permissions & 0o777);
-                            known_ownership.insert(path.clone(), (uid, gid));
+                            state.known_directories.insert(path.clone());
+                            state.known_permissions.insert(path.clone(), permissions & 0o777);
+                            state.known_ownership.insert(path.clone(), (uid, gid));
                         }
                         crate::fim::engine::FimEvent::DirectoryDeleted { path } => {
-                            known_directories.remove(&path);
-                            known_permissions.remove(&path);
-                            known_ownership.remove(&path);
+                            state.known_directories.remove(&path);
+                            state.known_permissions.remove(&path);
+                            state.known_ownership.remove(&path);
 
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("deleted_dir:{}", path.display());
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
@@ -863,23 +876,13 @@ async fn handle_run(
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("renamed_dir:{}:{}", from.display(), to.display());
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
@@ -904,27 +907,17 @@ async fn handle_run(
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("renamed_file:{}:{}", from.display(), to.display());
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
                                 // Se o arquivo foi renomeado, também previne falsos Deleted/Created subsequentes
-                                recent_alert_debounce.insert(format!("deleted:{}", from.display()), now);
-                                recent_alert_debounce.insert(format!("created:{}", to.display()), now);
+                                state.recent_alert_debounce.insert(format!("deleted:{}", from.display()), now);
+                                state.recent_alert_debounce.insert(format!("created:{}", to.display()), now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let alert = AlertMessage::new(
                                     &config.general.hostname,
@@ -958,35 +951,25 @@ async fn handle_run(
                                 // None = arquivo novo criado após daemon iniciar (alerta já vem via Created)
                                 // Some(old) == norm_perm = duplicata de kernel = descarta
                                 // Some(old) != norm_perm = mudança REAL de permissão = alerta
-                                let perm_changed = match known_permissions.get(&path) {
+                                let perm_changed = match state.known_permissions.get(&path) {
                                     None => false,  // Novo path: alerta já vem via FimEvent::Created
                                     Some(&old) => old != norm_perm,
                                 };
                                 if !perm_changed {
                                     continue;
                                 }
-                                known_permissions.insert(path.clone(), norm_perm);
+                                state.known_permissions.insert(path.clone(), norm_perm);
 
                                 // Debounce temporal para evitar duplicatas dentro da janela de 2s
                                 let key = format!("chmod:{}:{:o}", path.display(), norm_perm);
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let target_type = if is_dir { "Directory" } else { "File" };
                                 let alert = AlertMessage::new(
@@ -1014,35 +997,25 @@ async fn handle_run(
                                 // None = arquivo novo = alerta já vem via FimEvent::Created
                                 // Some((old_uid, old_gid)) == (uid, gid) = duplicata = descarta
                                 // Some((old_uid, old_gid)) != (uid, gid) = mudança REAL = alerta
-                                let owner_changed = match known_ownership.get(&path) {
+                                let owner_changed = match state.known_ownership.get(&path) {
                                     None => false,  // Novo path: alerta já vem via FimEvent::Created
                                     Some(&(old_uid, old_gid)) => old_uid != uid || old_gid != gid,
                                 };
                                 if !owner_changed {
                                     continue;
                                 }
-                                known_ownership.insert(path.clone(), (uid, gid));
+                                state.known_ownership.insert(path.clone(), (uid, gid));
 
                                 // Debounce temporal para evitar duplicatas dentro da janela de 2s
                                 let key = format!("chown:{}:{}:{}", path.display(), uid, gid);
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 let target_type = if is_dir { "Directory" } else { "File" };
                                 let user_display = user_name.unwrap_or_else(|| uid.to_string());
@@ -1072,14 +1045,14 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::Deleted { path } => {
-                            let is_directory = known_directories.remove(&path);
-                            known_permissions.remove(&path);
-                            known_ownership.remove(&path);
+                            let is_directory = state.known_directories.remove(&path);
+                            state.known_permissions.remove(&path);
+                            state.known_ownership.remove(&path);
 
                             if !analyzer.is_package_manager_active() {
                                 let key = format!("deleted:{}", path.display());
                                 let now = std::time::Instant::now();
-                                if let Some(last_time) = recent_alert_debounce.get(&key) {
+                                if let Some(last_time) = state.recent_alert_debounce.get(&key) {
                                     if now.duration_since(*last_time) < std::time::Duration::from_secs(2) {
                                         if !is_directory {
                                             let _ = db.delete_fingerprint(&path);
@@ -1087,18 +1060,8 @@ async fn handle_run(
                                         continue;
                                     }
                                 }
-                                recent_alert_debounce.insert(key, now);
+                                state.recent_alert_debounce.insert(key, now);
 
-                                let active_sessions = crate::analyzer::process_context::ProcessInspector::get_active_logged_in_ips();
-                                let ip_origin_str = if !active_sessions.is_empty() {
-                                    active_sessions
-                                        .iter()
-                                        .map(|s| s.ip_origin.clone())
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                } else {
-                                    "local console / service".to_string()
-                                };
 
                                 if is_directory {
                                     let alert = AlertMessage::new(

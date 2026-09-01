@@ -6,31 +6,52 @@ use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::error::Error;
 use std::path::Path;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::SmtpConfig;
 use crate::notifier::{AlertMessage, Notifier};
 
 pub struct SmtpNotifier {
     config: SmtpConfig,
+    /// PERF-06: Cached transport — built once at construction to avoid a TLS handshake on
+    /// every alert. `None` means construction failed (logged as warning; sends are no-ops).
+    transport: Option<AsyncSmtpTransport<Tokio1Executor>>,
 }
 
 impl SmtpNotifier {
     pub fn new(config: SmtpConfig) -> Self {
-        Self { config }
+        if !config.enabled {
+            return Self {
+                config,
+                transport: None,
+            };
+        }
+
+        let transport = match Self::build_transport_from(&config) {
+            Ok(t) => {
+                info!("SMTP transport initialized successfully.");
+                Some(t)
+            }
+            Err(e) => {
+                warn!("Failed to build SMTP transport at startup: {}. Email alerts will be disabled.", e);
+                None
+            }
+        };
+
+        Self { config, transport }
     }
 
-    fn build_transport(
-        &self,
+    fn build_transport_from(
+        cfg: &SmtpConfig,
     ) -> Result<AsyncSmtpTransport<Tokio1Executor>, Box<dyn Error + Send + Sync>> {
         let has_creds =
-            !self.config.username.trim().is_empty() && !self.config.password.trim().is_empty();
-        let creds = Credentials::new(self.config.username.clone(), self.config.password.clone());
+            !cfg.username.trim().is_empty() && !cfg.password.trim().is_empty();
+        let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
 
-        if !self.config.use_tls {
+        if !cfg.use_tls {
             let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
-                    .port(self.config.port);
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+                    .port(cfg.port);
             if has_creds {
                 builder = builder.credentials(creds);
             }
@@ -38,11 +59,11 @@ impl SmtpNotifier {
         }
 
         // Port 465 uses direct SMTPS (TLS wrapper), while 587/25 use STARTTLS
-        let transport = if self.config.port == 465 {
-            let tls_params = TlsParameters::builder(self.config.host.clone()).build_rustls()?;
+        let transport = if cfg.port == 465 {
+            let tls_params = TlsParameters::builder(cfg.host.clone()).build_rustls()?;
             let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.config.host)
-                    .port(self.config.port)
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+                    .port(cfg.port)
                     .tls(Tls::Wrapper(tls_params));
             if has_creds {
                 builder = builder.credentials(creds);
@@ -50,8 +71,8 @@ impl SmtpNotifier {
             builder.build()
         } else {
             let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.config.host)?
-                    .port(self.config.port);
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)?
+                    .port(cfg.port);
             if has_creds {
                 builder = builder.credentials(creds);
             }
@@ -61,7 +82,7 @@ impl SmtpNotifier {
         Ok(transport)
     }
 
-    /// Sends a generated PDF report attached to an email
+    /// Sends a generated PDF report attached to an email.
     pub async fn send_pdf_report(
         &self,
         to_email: &str,
@@ -69,6 +90,11 @@ impl SmtpNotifier {
         body_text: &str,
         pdf_path: &Path,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let transport = match &self.transport {
+            Some(t) => t,
+            None => return Err("SMTP transport not available".into()),
+        };
+
         let pdf_data = std::fs::read(pdf_path)?;
         let file_name = pdf_path
             .file_name()
@@ -89,7 +115,6 @@ impl SmtpNotifier {
                     .singlepart(attachment),
             )?;
 
-        let transport = self.build_transport()?;
         transport.send(email).await?;
         info!("PDF Report sent via SMTP successfully to {}", to_email);
         Ok(())
@@ -102,6 +127,11 @@ impl Notifier for SmtpNotifier {
         if !self.config.enabled {
             return Ok(());
         }
+
+        let transport = match &self.transport {
+            Some(t) => t,
+            None => return Ok(()), // startup warning already issued
+        };
 
         let to_addr = match &self.config.to_default {
             Some(addr) if !addr.trim().is_empty() => addr.trim(),
@@ -129,7 +159,6 @@ impl Notifier for SmtpNotifier {
             .subject(clean_subject)
             .singlepart(SinglePart::plain(clean_body))?;
 
-        let transport = self.build_transport()?;
         match transport.send(email).await {
             Ok(_) => {
                 info!("Email alert dispatched successfully to {}", to_addr);

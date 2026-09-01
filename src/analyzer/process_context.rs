@@ -1,13 +1,65 @@
 use std::fs;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::time::{Duration, Instant};
 
 pub struct ProcessInspector;
 
 #[derive(Debug, Clone)]
 pub struct ActiveUserSession {
+    /// SSH username (currently unused — kept for future session-correlation features)
+    #[allow(dead_code)]
     pub user: String,
+    /// TTY or connection type (currently unused — kept for diagnostics)
+    #[allow(dead_code)]
     pub tty: String,
     pub ip_origin: String,
+}
+
+/// PERF-01: Cache for active logged-in sessions to avoid scanning /proc every 500ms.
+///
+/// `get_active_logged_in_ips()` reads every /proc/<pid>/environ and /proc/net/tcp —
+/// on a system with 300+ processes this is ~500+ syscalls per call. With the default
+/// 500ms poll interval, calling it once per FIM event would generate thousands of
+/// extra syscalls per second. This cache reduces that to one real call every 3 seconds.
+pub struct IpSessionCache {
+    sessions: Vec<ActiveUserSession>,
+    last_refresh: Option<Instant>,
+    ttl: Duration,
+}
+
+impl IpSessionCache {
+    pub fn new() -> Self {
+        Self {
+            sessions: Vec::new(),
+            last_refresh: None,
+            ttl: Duration::from_secs(3),
+        }
+    }
+
+    /// Returns the cached IP origin string, refreshing from /proc if the cache is stale.
+    /// Format: "IP1, IP2, ..." or "local console / service" if no remote sessions.
+    pub fn get_ip_context_string(&mut self) -> String {
+        let now = Instant::now();
+        let stale = self
+            .last_refresh
+            .map(|t| now.duration_since(t) >= self.ttl)
+            .unwrap_or(true);
+
+        if stale {
+            self.sessions = ProcessInspector::get_active_logged_in_ips();
+            self.last_refresh = Some(now);
+        }
+
+        if self.sessions.is_empty() {
+            "local console / service".to_string()
+        } else {
+            self.sessions
+                .iter()
+                .map(|s| s.ip_origin.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
 }
 
 impl ProcessInspector {

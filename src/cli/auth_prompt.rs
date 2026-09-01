@@ -12,8 +12,8 @@ impl AuthPrompt {
     pub fn prompt_new_password() -> io::Result<String> {
         loop {
             let p1 = Self::prompt_password("Enter new admin password for SauronEye: ")?;
-            if p1.trim().len() < 8 {
-                println!("❌ Password must be at least 8 characters long. Please try again.");
+            if p1.trim().len() < 12 {
+                println!("❌ Password must be at least 12 characters long. Please try again.");
                 continue;
             }
 

@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Serialize;
-use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::config::DiscordConfig;
+use crate::notifier::shared::{retry_http_post, BreakerDecision, CircuitBreaker};
 use crate::notifier::{AlertMessage, AlertSeverity, Notifier};
 
 pub struct DiscordNotifier {
@@ -65,81 +65,54 @@ impl DiscordNotifier {
             // Discord rate limit per webhook is 5 requests per 2 seconds (safe cadence: 500ms)
             let min_interval = Duration::from_millis(500);
 
-            // Circuit Breaker: max 30 alerts per 60 seconds
-            const MAX_ALERTS_PER_MINUTE: usize = 30;
-            let window_duration = Duration::from_secs(60);
-            let mut recent_timestamps: VecDeque<Instant> = VecDeque::new();
-            let mut circuit_breaker_active = false;
-            let mut suppressed_count = 0usize;
+            // QC-09: CircuitBreaker replaces the previous inline VecDeque sliding-window logic
+            let mut breaker = CircuitBreaker::new(30); // max 30 alerts/min
 
             while let Some(alert) = rx.recv().await {
-                let now = Instant::now();
-
-                // Evict entries older than 60s
-                while let Some(&front) = recent_timestamps.front() {
-                    if now.duration_since(front) > window_duration {
-                        recent_timestamps.pop_front();
-                    } else {
-                        break;
-                    }
-                }
-
-                // Check Circuit Breaker threshold
-                if recent_timestamps.len() >= MAX_ALERTS_PER_MINUTE {
-                    suppressed_count += 1;
-                    if !circuit_breaker_active {
-                        circuit_breaker_active = true;
-                        warn!(
-                            "Discord Circuit Breaker TRIGGERED (threshold: {} alerts/min reached). Throttling outgoing Discord messages.",
-                            MAX_ALERTS_PER_MINUTE
-                        );
-
-                        let warning_msg = AlertMessage::with_timezone(
-                            &alert.host,
-                            "Discord Alert Throttling Activated (Anti-Flood Circuit Breaker)",
-                            AlertSeverity::Warning,
-                            &format!(
-                                "High frequency of security events detected (exceeded {} alerts/min).\n\n\
+                match breaker.check() {
+                    BreakerDecision::Suppress { first_open } => {
+                        if first_open {
+                            warn!(
+                                "Discord Circuit Breaker TRIGGERED (threshold: 30 alerts/min reached). Throttling outgoing Discord messages."
+                            );
+                            let warning_msg = AlertMessage::with_timezone(
+                                &alert.host,
+                                "Discord Alert Throttling Activated (Anti-Flood Circuit Breaker)",
+                                AlertSeverity::Warning,
+                                "High frequency of security events detected (exceeded 30 alerts/min).\n\n\
                                 🛡️ Discord notifications are temporarily throttled to avoid rate limits.\n\
                                 📋 100% of events continue being audited in SQLite and forensic PDF reports.",
-                                MAX_ALERTS_PER_MINUTE
-                            ),
-                            true,
-                        );
-
-                        Self::dispatch_embed(&client, &config, &warning_msg).await;
+                                true,
+                            );
+                            Self::dispatch_embed(&client, &config, &warning_msg).await;
+                        }
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
                     }
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
+                    BreakerDecision::JustRecovered { suppressed } => {
+                        if suppressed > 0 {
+                            info!(
+                                "Discord Circuit Breaker RESET. Suppressed {} alerts during burst window.",
+                                suppressed
+                            );
+                            let recovery_msg = AlertMessage::with_timezone(
+                                &alert.host,
+                                "Discord Alerting Resumed",
+                                AlertSeverity::Info,
+                                &format!(
+                                    "Traffic normalized. {} alerts were suppressed on Discord during the burst and securely preserved in forensic database.",
+                                    suppressed
+                                ),
+                                true,
+                            );
+                            Self::dispatch_embed(&client, &config, &recovery_msg).await;
+                        }
+                    }
+                    BreakerDecision::Pass => {}
                 }
 
-                // When traffic normalizes
-                if circuit_breaker_active {
-                    circuit_breaker_active = false;
-                    if suppressed_count > 0 {
-                        info!(
-                            "Discord Circuit Breaker RESET. Suppressed {} alerts during burst window.",
-                            suppressed_count
-                        );
-                        let recovery_msg = AlertMessage::with_timezone(
-                            &alert.host,
-                            "Discord Alerting Resumed",
-                            AlertSeverity::Info,
-                            &format!(
-                                "Traffic normalized. {} alerts were suppressed on Discord during the burst and securely preserved in forensic database.",
-                                suppressed_count
-                            ),
-                            true,
-                        );
-                        Self::dispatch_embed(&client, &config, &recovery_msg).await;
-                        suppressed_count = 0;
-                    }
-                }
-
-                recent_timestamps.push_back(Instant::now());
-
+                breaker.record_sent();
                 Self::dispatch_embed(&client, &config, &alert).await;
-
                 tokio::time::sleep(min_interval).await;
             }
         });
@@ -185,37 +158,20 @@ impl DiscordNotifier {
             }],
         };
 
-        let mut attempts = 0;
-        let max_attempts = 3;
+        // QC-10: retry_http_post replaces the previous inline retry loop
+        let sent = retry_http_post(
+            client,
+            &config.webhook_url,
+            &payload,
+            3,
+            Duration::from_secs(5),
+            Duration::from_secs(2),
+            "Discord",
+        )
+        .await;
 
-        while attempts < max_attempts {
-            attempts += 1;
-            match client.post(&config.webhook_url).json(&payload).send().await {
-                Ok(response) => {
-                    let status = response.status();
-                    if status.is_success() {
-                        info!("Discord alert dispatched successfully: {}", alert.title);
-                        break;
-                    } else if status.as_u16() == 429 {
-                        warn!(
-                            "Discord rate limit hit (429). Backing off for 5s (attempt {}/{})",
-                            attempts, max_attempts
-                        );
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    } else {
-                        let body = response.text().await.unwrap_or_default();
-                        error!("Discord API error (status {}): {}", status, body);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Discord network error (attempt {}/{}): {}",
-                        attempts, max_attempts, e
-                    );
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
+        if sent {
+            info!("Discord alert dispatched successfully: {}", alert.title);
         }
     }
 }

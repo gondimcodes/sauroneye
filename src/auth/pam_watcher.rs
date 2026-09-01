@@ -7,6 +7,8 @@ pub struct AuthEvent {
     pub user: String,
     pub service: String,
     pub rhost: Option<String>,
+    /// TTY device (present in syslog lines, not yet used in alert formatting)
+    #[allow(dead_code)]
     pub tty: Option<String>,
     pub success: bool,
     pub raw_message: String,
@@ -123,13 +125,18 @@ impl PamWatcher {
                 "pam".to_string()
             };
 
+            // SEG-01: sanitize to prevent log injection via crafted usernames/lines
+            let raw_message: String = line.trim().chars().map(|c| {
+                if c.is_control() { ' ' } else { c }
+            }).collect();
+
             return Some(AuthEvent {
                 user,
                 service,
                 rhost,
                 tty: None,
                 success: is_success,
-                raw_message: line.trim().to_string(),
+                raw_message,
             });
         }
         None

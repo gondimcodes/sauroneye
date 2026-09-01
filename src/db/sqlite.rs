@@ -2,14 +2,29 @@ use rusqlite::{params, Connection};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 use crate::db::schema::SCHEMA_SQL;
 use crate::db::user::AdminAuth;
 use crate::fim::state::FileFingerprint;
 
+/// Acquire a Mutex<Connection> with poison recovery.
+/// If the mutex is poisoned (a thread panicked while holding it), we log a warning
+/// and recover the inner value rather than propagating the panic to the caller.
+macro_rules! lock_conn {
+    ($self:expr) => {
+        $self.conn.lock().unwrap_or_else(|poisoned| {
+            warn!("SQLite mutex was poisoned — recovering inner connection. Check for prior panics.");
+            poisoned.into_inner()
+        })
+    };
+}
+
 #[derive(Clone)]
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
+    /// Stored for diagnostics and status display (get_db_path)
+    #[allow(dead_code)]
     db_path: PathBuf,
 }
 
@@ -54,7 +69,7 @@ impl Database {
     }
 
     pub fn is_initialized(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare("SELECT COUNT(*) FROM admin_users WHERE username = 'admin'")?;
         let count: i64 = stmt.query_row([], |row| row.get(0))?;
         Ok(count > 0)
@@ -64,7 +79,7 @@ impl Database {
         &self,
         password_hash: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO admin_users (username, password_hash, created_at) VALUES (?1, ?2, ?3)",
@@ -77,7 +92,7 @@ impl Database {
         &self,
         new_password_hash: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         conn.execute(
             "UPDATE admin_users SET password_hash = ?1 WHERE username = 'admin'",
             params![new_password_hash],
@@ -86,7 +101,7 @@ impl Database {
     }
 
     pub fn verify_admin_login(&self, password: &str) -> Result<bool, Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt =
             conn.prepare("SELECT password_hash FROM admin_users WHERE username = 'admin'")?;
         let hash_opt: Option<String> = stmt.query_row([], |row| row.get(0)).ok();
@@ -102,14 +117,14 @@ impl Database {
         &self,
         fingerprints: &[FileFingerprint],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = lock_conn!(self);
         let tx = conn.transaction()?;
 
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO file_fingerprints 
-                (path, inode, size, mtime, permissions, hash_algorithm, hash_value, package_name, package_version, last_verified)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO file_fingerprints
+                (path, inode, size, mtime, permissions, hash_algorithm, hash_value, last_verified)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                 ON CONFLICT(path) DO UPDATE SET
                     inode = excluded.inode,
                     size = excluded.size,
@@ -117,9 +132,7 @@ impl Database {
                     permissions = excluded.permissions,
                     hash_algorithm = excluded.hash_algorithm,
                     hash_value = excluded.hash_value,
-                    package_name = excluded.package_name,
-                    package_version = excluded.package_version,
-                    last_verified = excluded.last_verified"
+                    last_verified = excluded.last_verified",
             )?;
 
             for fp in fingerprints {
@@ -131,8 +144,6 @@ impl Database {
                     fp.permissions as i64,
                     fp.hash_algorithm,
                     fp.hash_value,
-                    fp.package_name,
-                    fp.package_version,
                     fp.last_verified,
                 ])?;
             }
@@ -146,10 +157,10 @@ impl Database {
         &self,
         path: &Path,
     ) -> Result<Option<FileFingerprint>, Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare(
-            "SELECT path, inode, size, mtime, permissions, hash_algorithm, hash_value, package_name, package_version, last_verified
-             FROM file_fingerprints WHERE path = ?1"
+            "SELECT path, inode, size, mtime, permissions, hash_algorithm, hash_value, last_verified
+             FROM file_fingerprints WHERE path = ?1",
         )?;
 
         let path_str = path.to_string_lossy();
@@ -161,9 +172,7 @@ impl Database {
             let perm_i64: i64 = row.get(4)?;
             let hash_algo: String = row.get(5)?;
             let hash_val: String = row.get(6)?;
-            let pkg_name: Option<String> = row.get(7)?;
-            let pkg_ver: Option<String> = row.get(8)?;
-            let last_ver: i64 = row.get(9)?;
+            let last_ver: i64 = row.get(7)?;
 
             Ok(FileFingerprint {
                 path: PathBuf::from(p_str),
@@ -173,8 +182,6 @@ impl Database {
                 permissions: perm_i64 as u32,
                 hash_algorithm: hash_algo,
                 hash_value: hash_val,
-                package_name: pkg_name,
-                package_version: pkg_ver,
                 last_verified: last_ver,
             })
         });
@@ -185,20 +192,9 @@ impl Database {
             Err(e) => Err(Box::new(e)),
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct AuditLogEntry {
-    pub id: i64,
-    pub timestamp: i64,
-    pub action: String,
-    pub actor: String,
-    pub details: String,
-}
-
-impl Database {
     pub fn delete_fingerprint(&self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let path_str = path.to_string_lossy();
         conn.execute(
             "DELETE FROM file_fingerprints WHERE path = ?1",
@@ -213,7 +209,7 @@ impl Database {
         actor: &str,
         details: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO audit_logs (timestamp, action, actor, details) VALUES (?1, ?2, ?3, ?4)",
@@ -227,7 +223,7 @@ impl Database {
         start_ts: i64,
         end_ts: i64,
     ) -> Result<Vec<AuditLogEntry>, Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, action, actor, details FROM audit_logs WHERE timestamp >= ?1 AND timestamp <= ?2 ORDER BY timestamp ASC, id ASC"
         )?;
@@ -254,7 +250,7 @@ impl Database {
         start_ts: i64,
         end_ts: i64,
     ) -> Result<usize, Box<dyn Error + Send + Sync>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self);
         let count = conn.execute(
             "DELETE FROM audit_logs WHERE timestamp >= ?1 AND timestamp <= ?2",
             params![start_ts, end_ts],
@@ -262,7 +258,20 @@ impl Database {
         Ok(count)
     }
 
+    /// Returns the path of the SQLite database file (used for diagnostics).
+    #[allow(dead_code)]
     pub fn get_db_path(&self) -> &Path {
         &self.db_path
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditLogEntry {
+    /// DB primary key — kept for future use in deletion/deduplication
+    #[allow(dead_code)]
+    pub id: i64,
+    pub timestamp: i64,
+    pub action: String,
+    pub actor: String,
+    pub details: String,
 }
