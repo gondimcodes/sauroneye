@@ -12,7 +12,6 @@ pub enum HashAlgorithm {
     Xxh64,
 }
 
-
 impl HashAlgorithm {
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -30,7 +29,6 @@ impl HashAlgorithm {
         }
     }
 }
-
 
 /// Computes file hash in a fast and streaming manner without loading entire large files to memory.
 /// Compatible with scalar and legacy CPU architectures (zero AVX instruction trap).

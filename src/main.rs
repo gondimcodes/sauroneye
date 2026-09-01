@@ -1,4 +1,3 @@
-
 mod analyzer;
 mod auth;
 mod cli;
@@ -625,7 +624,9 @@ async fn handle_run(
                     state.known_directories.insert(path.clone());
                 }
                 if let Ok(meta) = std::fs::metadata(&path) {
-                    state.known_permissions.insert(path.clone(), meta.mode() & 0o777);
+                    state
+                        .known_permissions
+                        .insert(path.clone(), meta.mode() & 0o777);
                     state.known_ownership.insert(path, (meta.uid(), meta.gid()));
                 }
             }

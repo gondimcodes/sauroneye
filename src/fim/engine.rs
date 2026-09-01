@@ -541,7 +541,10 @@ impl FimEngine {
             } else {
                 // Relative pattern — match against path components only, not arbitrary substrings.
                 // This prevents 'tmp' from matching '/var/www/upload_tmp/file'.
-                if path.components().any(|c| c.as_os_str().to_string_lossy() == pattern.as_str()) {
+                if path
+                    .components()
+                    .any(|c| c.as_os_str().to_string_lossy() == pattern.as_str())
+                {
                     return true;
                 }
                 // Also allow exact filename match

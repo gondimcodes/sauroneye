@@ -126,9 +126,11 @@ impl PamWatcher {
             };
 
             // SEG-01: sanitize to prevent log injection via crafted usernames/lines
-            let raw_message: String = line.trim().chars().map(|c| {
-                if c.is_control() { ' ' } else { c }
-            }).collect();
+            let raw_message: String = line
+                .trim()
+                .chars()
+                .map(|c| if c.is_control() { ' ' } else { c })
+                .collect();
 
             return Some(AuthEvent {
                 user,

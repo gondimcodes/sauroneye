@@ -53,7 +53,13 @@ impl WhatsappNotifier {
                                 📋 100% of events continue being audited in SQLite and forensic PDF reports.",
                                 true,
                             );
-                            Self::dispatch_raw(&client, &config, &warning_msg.format_text(), &warning_msg.title).await;
+                            Self::dispatch_raw(
+                                &client,
+                                &config,
+                                &warning_msg.format_text(),
+                                &warning_msg.title,
+                            )
+                            .await;
                         }
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
@@ -74,7 +80,13 @@ impl WhatsappNotifier {
                                 ),
                                 true,
                             );
-                            Self::dispatch_raw(&client, &config, &recovery_msg.format_text(), &recovery_msg.title).await;
+                            Self::dispatch_raw(
+                                &client,
+                                &config,
+                                &recovery_msg.format_text(),
+                                &recovery_msg.title,
+                            )
+                            .await;
                         }
                     }
                     BreakerDecision::Pass => {}

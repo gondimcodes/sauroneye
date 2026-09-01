@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
 
-
 pub use discord::DiscordNotifier;
 pub use email::SmtpNotifier;
 pub use msteams::MsTeamsNotifier;

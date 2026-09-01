@@ -33,7 +33,10 @@ impl SmtpNotifier {
                 Some(t)
             }
             Err(e) => {
-                warn!("Failed to build SMTP transport at startup: {}. Email alerts will be disabled.", e);
+                warn!(
+                    "Failed to build SMTP transport at startup: {}. Email alerts will be disabled.",
+                    e
+                );
                 None
             }
         };
@@ -44,14 +47,12 @@ impl SmtpNotifier {
     fn build_transport_from(
         cfg: &SmtpConfig,
     ) -> Result<AsyncSmtpTransport<Tokio1Executor>, Box<dyn Error + Send + Sync>> {
-        let has_creds =
-            !cfg.username.trim().is_empty() && !cfg.password.trim().is_empty();
+        let has_creds = !cfg.username.trim().is_empty() && !cfg.password.trim().is_empty();
         let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
 
         if !cfg.use_tls {
             let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-                    .port(cfg.port);
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host).port(cfg.port);
             if has_creds {
                 builder = builder.credentials(creds);
             }
@@ -61,18 +62,16 @@ impl SmtpNotifier {
         // Port 465 uses direct SMTPS (TLS wrapper), while 587/25 use STARTTLS
         let transport = if cfg.port == 465 {
             let tls_params = TlsParameters::builder(cfg.host.clone()).build_rustls()?;
-            let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-                    .port(cfg.port)
-                    .tls(Tls::Wrapper(tls_params));
+            let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+                .port(cfg.port)
+                .tls(Tls::Wrapper(tls_params));
             if has_creds {
                 builder = builder.credentials(creds);
             }
             builder.build()
         } else {
             let mut builder =
-                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)?
-                    .port(cfg.port);
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)?.port(cfg.port);
             if has_creds {
                 builder = builder.credentials(creds);
             }

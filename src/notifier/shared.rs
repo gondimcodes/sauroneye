@@ -126,17 +126,17 @@ pub async fn retry_http_post<T: Serialize>(
                     tokio::time::sleep(backoff_429).await;
                 } else {
                     let body = response.text().await.unwrap_or_default();
-                    tracing::error!(
-                        "{} API error (status {}): {}",
-                        service_name, status, body
-                    );
+                    tracing::error!("{} API error (status {}): {}", service_name, status, body);
                     break;
                 }
             }
             Err(e) => {
                 tracing::error!(
                     "{} network error (attempt {}/{}): {}",
-                    service_name, attempts, max_attempts, e
+                    service_name,
+                    attempts,
+                    max_attempts,
+                    e
                 );
                 tokio::time::sleep(backoff_err).await;
             }

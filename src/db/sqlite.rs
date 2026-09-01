@@ -14,7 +14,9 @@ use crate::fim::state::FileFingerprint;
 macro_rules! lock_conn {
     ($self:expr) => {
         $self.conn.lock().unwrap_or_else(|poisoned| {
-            warn!("SQLite mutex was poisoned — recovering inner connection. Check for prior panics.");
+            warn!(
+                "SQLite mutex was poisoned — recovering inner connection. Check for prior panics."
+            );
             poisoned.into_inner()
         })
     };
