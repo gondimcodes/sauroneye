@@ -174,6 +174,10 @@ impl MsTeamsNotifier {
 
         let card_title = format!("{} {}", title_prefix, alert.title);
 
+        // Teams Adaptive Card TextBlock does not interpret bare \n as line breaks.
+        // Markdown line-break syntax requires two trailing spaces before \n.
+        let details_md = alert.details.replace('\n', "  \n");
+
         let payload = AdaptiveCardEnvelope {
             msg_type: "message",
             attachments: vec![AdaptiveCardAttachment {
@@ -203,7 +207,7 @@ impl MsTeamsNotifier {
                             ],
                         },
                         AdaptiveCardElement::TextBlock {
-                            text: &alert.details,
+                            text: &details_md,
                             weight: "Default",
                             size: "Default",
                             color: "Default",
