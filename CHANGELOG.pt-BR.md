@@ -7,6 +7,13 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [Em Desenvolvimento] - 1.0.7
+
+### Corrigido
+- **Detecção de Gerenciador de Pacotes Reescrita com Advisory Lock `flock()`**: Substituída a abordagem frágil de varredura de nomes de processos em `/proc/*/comm` por um teste de lock exclusivo não-bloqueante via `flock()` nos arquivos de trava canônicos de cada distribuição (`/var/lib/dpkg/lock-frontend`, `/var/lib/rpm/.rpm.lock`, `/var/lib/pacman/db.lck`, `/lib/apk/db/lock`, `/var/lib/zypp/zypp.lock`). Esse é o mecanismo idêntico ao utilizado pelos próprios `apt`, `dpkg`, `dnf`, `pacman` e `apk` para detectar execução concorrente. A abordagem anterior era suscetível a daemons do sistema em execução permanente (ex: `packagekitd`, `apt-cacher-ng`) cujos nomes de processo casavam parcialmente com a lista de detecção, causando supressão silenciosa de todos os alertas FIM. A nova abordagem é totalmente determinística, universal para qualquer gerenciador de pacotes e qualquer distribuição, e imune a colisões de nomes de processo.
+
+---
+
 ## [1.0.6] - 2026-08-31
 
 ### Adicionado

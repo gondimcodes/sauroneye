@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - 1.0.7
+
+### Fixed
+- **Package Manager Detection Rewritten with `flock()` Advisory Lock**: Replaced the brittle `/proc/*/comm` process-name scanning approach with a kernel-level non-blocking exclusive `flock()` test on the distro's canonical lock files (`/var/lib/dpkg/lock-frontend`, `/var/lib/rpm/.rpm.lock`, `/var/lib/pacman/db.lck`, `/lib/apk/db/lock`, `/var/lib/zypp/zypp.lock`). This is the identical mechanism used by `apt`, `dpkg`, `dnf`, `pacman`, and `apk` themselves to detect concurrent execution. The previous approach was susceptible to permanently running system daemons (e.g. `packagekitd`, `apt-cacher-ng`) whose process names partially matched the detection list, causing all FIM alerts to be silently suppressed. The new approach is fully deterministic, universal across all package managers and distributions, and immune to process-name collisions.
+
+---
+
 ## [1.0.6] - 2026-08-31
 
 ### Added

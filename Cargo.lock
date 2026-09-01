@@ -1854,7 +1854,7 @@ dependencies = [
 
 [[package]]
 name = "sauroneye"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "argon2",
  "async-trait",
