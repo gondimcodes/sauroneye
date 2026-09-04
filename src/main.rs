@@ -610,6 +610,15 @@ async fn handle_run(
         if internal_dir.exists() && !scan_roots.contains(&internal_dir) {
             scan_roots.push(internal_dir);
         }
+        let config_dir = std::path::PathBuf::from("/etc/sauroneye");
+        if config_dir.exists() && !scan_roots.contains(&config_dir) {
+            scan_roots.push(config_dir);
+        }
+        if let Ok(exe_path) = std::env::current_exe() {
+            if exe_path.exists() && !scan_roots.contains(&exe_path) {
+                scan_roots.push(exe_path);
+            }
+        }
 
         for root in &scan_roots {
             if root.is_dir() {

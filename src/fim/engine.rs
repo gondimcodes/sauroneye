@@ -130,6 +130,11 @@ impl FimEngine {
         if config_dir.exists() && !scan_paths.contains(&config_dir) {
             scan_paths.push(config_dir);
         }
+        if let Ok(exe_path) = std::env::current_exe() {
+            if exe_path.exists() && !scan_paths.contains(&exe_path) {
+                scan_paths.push(exe_path);
+            }
+        }
 
         for include_path in &scan_paths {
             if !include_path.exists() {
@@ -229,6 +234,17 @@ impl FimEngine {
                 config_dir.display()
             );
             let _ = watcher.watch(config_dir, RecursiveMode::Recursive);
+        }
+
+        // 4. Autodefesa Nativa e Inviolável do próprio binário executável do SauronEye
+        if let Ok(exe_path) = std::env::current_exe() {
+            if exe_path.exists() && !self.config.include_paths.contains(&exe_path) {
+                info!(
+                    "Registering native immutable FIM watch on daemon binary: {}",
+                    exe_path.display()
+                );
+                let _ = watcher.watch(&exe_path, RecursiveMode::NonRecursive);
+            }
         }
 
         let active_exclusions = self.active_exclusions.clone();

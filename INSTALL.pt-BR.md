@@ -109,12 +109,13 @@ Crie o arquivo de serviço em `/etc/systemd/system/sauroneye.service`:
 Description=SauronEye — Sentinela de FIM em Tempo Real e Detecção de Intrusão
 After=network.target auditd.service
 Wants=network-online.target
+RefuseManualStop=yes
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/sauroneye --config /etc/sauroneye/config.toml run
 Restart=always
-RestartSec=5s
+RestartSec=1s
 LimitNOFILE=65535
 StandardOutput=journal
 StandardError=journal
@@ -130,13 +131,18 @@ ProtectControlGroups=true
 WantedBy=multi-user.target
 ```
 
-Recarregue e inicialize o serviço:
+Habilite e inicialize o serviço, e em seguida aplique o atributo de imutabilidade no arquivo da unit contra manipulações indevidas:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now sauroneye
 sudo systemctl status sauroneye
+
+# Blindar o arquivo da unit no systemd com o atributo imutável (bloqueia stop/mask/adulteração pelo root)
+sudo chattr +i /etc/systemd/system/sauroneye.service
 ```
+
+> **Autodefesa & Atualizações:** Com `RefuseManualStop=yes` e `chattr +i`, tentativas de executar `systemctl stop sauroneye` são rejeitadas nativamente pelo Systemd. Graças à diretiva `Restart=always` (1s), atualizações futuras de versão **não** exigem desproteger o arquivo de serviço: basta sobrescrever `/usr/local/bin/sauroneye` e disparar `sudo killall -SIGTERM sauroneye`. O Systemd ressuscitará o daemon instantaneamente em 1 segundo já executando o novo binário.
 
 ---
 

@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 1.0.7
+## [Unreleased] - 1.0.8
+
+### Security & Hardening
+- **Native Executable Self-Defense (FIM)**: The running daemon binary (`std::env::current_exe()`) is now natively and immutably monitored by the FIM engine (`scan_baseline()` and `start_watcher()`), as well as pre-loaded in initial permission/ownership state maps. Any unauthorized file replacement, deletion, or permission tampering (`chmod`/`chown`) targeting the SauronEye binary triggers immediate FIM alerts.
+- **Systemd Unit Hardening & Anti-Tampering (`RefuseManualStop`)**:
+  - Configured `RefuseManualStop=yes` in the systemd service template to block manual or script-driven `systemctl stop` attempts.
+  - Decreased `RestartSec` to `1s` with `Restart=always`, enabling instant resurrection upon unexpected process termination.
+  - Documented immutable attribute application (`chattr +i /etc/systemd/system/sauroneye.service`) to prevent unauthorized service modification or masking by root, while preserving seamless zero-downtime upgrades via `killall -SIGTERM sauroneye`.
+
+---
+
+## [1.0.7] - 2026-09-02
 
 > ⚠️ **BREAKING CHANGE — Database Schema**: The `file_fingerprints` table no longer contains the
 > `package_name` and `package_version` columns. These fields were YAGNI (never populated, never read).

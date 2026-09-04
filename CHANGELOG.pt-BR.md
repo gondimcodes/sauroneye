@@ -7,7 +7,40 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
-## [Em Desenvolvimento] - 1.0.7
+## [Em Desenvolvimento] - 1.0.8
+
+### Segurança e Blindagem
+- **Autodefesa Nativa do Binário Executável (FIM)**: O executável do próprio daemon em execução (`std::env::current_exe()`) agora é monitorado de forma nativa e imutável pelo motor FIM (`scan_baseline()` e `start_watcher()`), além de ser pré-carregado nos mapas de integridade de permissões e propriedade (`ownership`). Qualquer tentativa de substituição, deleção, `chmod` ou `chown` sobre o executável do SauronEye gera alertas FIM imediatos.
+- **Blindagem e Imutabilidade da Unit no Systemd (`RefuseManualStop`)**:
+  - Configurada a diretiva `RefuseManualStop=yes` no template do serviço systemd para bloquear nativamente tentativas de parada via `systemctl stop`.
+  - Reduzido `RestartSec` para `1s` com `Restart=always`, garantindo ressuscitação instantânea caso o processo seja terminado.
+  - Documentada a aplicação do atributo de imutabilidade (`chattr +i /etc/systemd/system/sauroneye.service`) contra alterações não autorizadas ou mascaramento (`mask`), preservando o fluxo de atualização em produção via `killall -SIGTERM sauroneye`.
+
+---
+
+## [1.0.7] - 2026-09-02
+
+> ⚠️ **MUDANÇA QUEBRANTE (BREAKING CHANGE) — Schema do Banco**: A tabela `file_fingerprints` não contém mais as colunas `package_name` e `package_version` (YAGNI). O banco de dados SQLite deve ser recriado (`rm /var/lib/sauroneye/sauron.db` seguido de `sauroneye init`) antes de executar esta versão. Todos os registros forenses em `audit_logs` permanecem intactos.
+
+### Segurança
+- **Prevenção de Injeção de Logs (Log Injection)**: Sanitização de `raw_message` em `pam_watcher.rs` — caracteres de controle em nomes de usuário forjados são substituídos por espaços.
+- **Correção de Bypass de Path Traversal no Motor de Exclusões FIM**: Substituição de `contains` por `starts_with` e casamento de componentes de caminho.
+- **Recuperação de Poisoned Mutex no SQLite**: Substituição de locks ingênuos pela macro `lock_conn!`.
+- **Mascaramento de Dados Sensíveis nos Logs**: Ocultação de `chat_id` do Telegram e URLs/números do WhatsApp nos logs do sistema.
+- **Operação Atômica de Check-and-Insert no Detector RCE**: Eliminação de condição de corrida TOCTOU em `alerted_pids`.
+- **Substituição de Mutex Síncrono por `tokio::sync::Mutex` no Dispatcher**: Previne bloqueio do scheduler Tokio durante despacho de alertas.
+
+### Performance
+- **`IpSessionCache` com TTL de 3s**: Elimina centenas de varreduras redundantes em `/proc` por segundo durante rajadas FIM.
+- **Limpeza Periódica do Mapa de Debounce**: Limite de crescimento de memória sob tráfego intenso.
+- **Buffer de Canal MPSC FIM Expandido (512 → 2048)**: Absorve rajadas de eventos (`rsync`, `chmod -R`) sem contenção.
+- **Transporte SMTP em Cache**: Reutilização de conexão TLS reduz latência no envio de e-mails.
+
+### Refatoração e Qualidade
+- **Eliminado `#![allow(dead_code)]` Global**: Código mantido sob escrutínio estrito do compilador.
+- **Estrutura `MonitorState`**: Desacoplamento e centralização de estados no loop principal.
+- **Módulo Compartilhado de Notificadores (`notifier/shared.rs`)**: Deduplicação do Circuit Breaker e retentativas HTTP.
+- **Tamanho Mínimo de Senha Admin Elevado para 12 Caracteres**.
 
 ### Corrigido
 - **Detecção de Gerenciador de Pacotes Reescrita com Advisory Lock `flock()`**: Substituída a abordagem frágil de varredura de nomes de processos em `/proc/*/comm` por um teste de lock exclusivo não-bloqueante via `flock()` nos arquivos de trava canônicos de cada distribuição (`/var/lib/dpkg/lock-frontend`, `/var/lib/rpm/.rpm.lock`, `/var/lib/pacman/db.lck`, `/lib/apk/db/lock`, `/var/lib/zypp/zypp.lock`). Esse é o mecanismo idêntico ao utilizado pelos próprios `apt`, `dpkg`, `dnf`, `pacman` e `apk` para detectar execução concorrente. A abordagem anterior era suscetível a daemons do sistema em execução permanente (ex: `packagekitd`, `apt-cacher-ng`) cujos nomes de processo casavam parcialmente com a lista de detecção, causando supressão silenciosa de todos os alertas FIM. A nova abordagem é totalmente determinística, universal para qualquer gerenciador de pacotes e qualquer distribuição, e imune a colisões de nomes de processo.
