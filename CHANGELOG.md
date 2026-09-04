@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - 1.0.8
+## [1.0.8] - 2026-09-04
 
 ### Security & Hardening
 - **Native Executable Self-Defense (FIM)**: The running daemon binary (`std::env::current_exe()`) is now natively and immutably monitored by the FIM engine (`scan_baseline()` and `start_watcher()`), as well as pre-loaded in initial permission/ownership state maps. Any unauthorized file replacement, deletion, or permission tampering (`chmod`/`chown`) targeting the SauronEye binary triggers immediate FIM alerts.
