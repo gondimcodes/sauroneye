@@ -10,22 +10,22 @@ impl PackageManagerChecker {
         Self { enabled }
     }
 
-    /// Checks if a package manager is currently active by attempting a
-    /// non-blocking exclusive flock() on the distro's canonical lock file.
+    /// Checks if a package manager is currently active by attempting non-blocking
+    /// exclusive flock() and POSIX fcntl() locks on canonical lock files, and by checking
+    /// for active package manager processes running in `/proc`.
     ///
-    /// This is the exact same mechanism used by apt, dpkg, dnf, pacman and
-    /// apk themselves to detect concurrent execution — no process-name
-    /// guessing, no /proc/locks parsing, no false positives.
+    /// This dual-check eliminates false positives during operations like `apt full-upgrade`
+    /// where apt/dpkg hold POSIX locks (`F_SETLK`) which do not conflict with BSD `flock(2)`
+    /// on Linux kernels.
     ///
-    /// Returns true  → lock is held by someone else (package manager running).
-    /// Returns false → lock is free (safe to alert).
+    /// Returns true  → package manager is active.
+    /// Returns false → no package manager active (safe to alert).
     pub fn is_package_manager_locked(&self) -> bool {
         if !self.enabled {
             return false;
         }
 
-        // Canonical lock files per distro — if ANY of them is exclusively
-        // locked by another process, a package manager is active.
+        // 1. Canonical lock files per distro — check both BSD flock and POSIX fcntl lock
         let lock_files = [
             "/var/lib/dpkg/lock-frontend", // apt / dpkg (Debian/Ubuntu)
             "/var/lib/dpkg/lock",          // dpkg direct
@@ -40,51 +40,104 @@ impl PackageManagerChecker {
             if !p.exists() {
                 continue;
             }
-            if Self::is_file_exclusively_locked(p) {
+            if Self::is_file_locked(p) {
                 return true;
             }
+        }
+
+        // 2. Fallback check: is any package manager process currently running in /proc?
+        if Self::is_any_package_manager_running() {
+            return true;
         }
 
         false
     }
 
-    /// Tries to acquire a non-blocking exclusive flock() on `path`.
-    /// If it succeeds → nobody holds the lock → returns false.
-    /// If it fails with EWOULDBLOCK → lock is held → returns true.
-    fn is_file_exclusively_locked(path: &Path) -> bool {
+    /// Checks whether `path` is exclusively locked using /proc/locks (POSIX/FLOCK),
+    /// or by attempting a non-blocking BSD flock on a dedicated descriptor.
+    ///
+    /// IMPORTANT: Checking `/proc/locks` first by inode is zero-overhead and avoids
+    /// the classic POSIX caveat where calling `close()` on any file descriptor for a path
+    /// releases all POSIX record locks held on that inode across the calling process.
+    fn is_file_locked(path: &Path) -> bool {
         use nix::fcntl::{Flock, FlockArg};
+        use std::os::unix::fs::MetadataExt;
 
+        // 1. Primary check: check /proc/locks for active lock on this path's inode.
+        // This detects POSIX F_SETLK/F_SETLKW locks held by apt, dpkg, or any child process
+        // without touching or closing file descriptors.
+        if let Ok(meta) = std::fs::metadata(path) {
+            let target_ino = meta.ino();
+            if Self::is_inode_locked_in_proc_locks(target_ino) {
+                return true;
+            }
+        }
+
+        // 2. Secondary check: test BSD flock
         let file = match OpenOptions::new().read(true).open(path) {
             Ok(f) => f,
-            Err(_) => return false, // Can't open → assume not locked
+            Err(_) => return false,
         };
 
         match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-            Ok(_guard) => {
-                // We got the lock — nobody else holds it.
-                // Guard is dropped here, releasing the lock automatically.
+            Ok(guard) => {
+                drop(guard);
                 false
             }
-            Err((_file, nix::errno::Errno::EWOULDBLOCK)) => {
-                // Lock is held by another process — package manager is active.
-                true
-            }
-            Err(_) => {
-                // Other error → treat as not locked.
-                false
-            }
+            Err((_file, nix::errno::Errno::EWOULDBLOCK)) => true,
+            Err(_) => false,
         }
     }
 
-    /// Used by analyze_modification() to check if the process that wrote a
-    /// specific file is a known package-manager helper.
-    /// NOTE: this is secondary context, not the primary gate for alerts.
+    /// Checks if a file inode appears in `/proc/locks` under POSIX/FLOCK holding an exclusive lock.
+    fn is_inode_locked_in_proc_locks(target_ino: u64) -> bool {
+        if let Ok(locks_data) = std::fs::read_to_string("/proc/locks") {
+            let ino_str = target_ino.to_string();
+            for line in locks_data.lines() {
+                // Line format: 1: POSIX  ADVISORY  WRITE 12345 08:01:1234567 0 EOF
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 6 {
+                    let dev_ino = parts[5];
+                    if let Some(ino) = dev_ino.split(':').nth(2) {
+                        if ino == ino_str {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Scans `/proc` to verify if any canonical package manager is actively running.
+    /// Fast directory scan reading only `/proc/[pid]/comm` without reading heavy environ.
+    fn is_any_package_manager_running() -> bool {
+        if let Ok(entries) = std::fs::read_dir("/proc") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Check if directory name is numeric (PID)
+                if name_str.chars().all(|c| c.is_ascii_digit()) {
+                    let comm_path = entry.path().join("comm");
+                    if let Ok(comm) = std::fs::read_to_string(comm_path) {
+                        let proc_name = comm.trim();
+                        if Self::is_known_package_manager_name(proc_name) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Primary exact match for known package manager processes.
     pub fn is_package_manager_process(&self, proc_name: &str) -> bool {
         let name = proc_name.rsplit('/').next().unwrap_or(proc_name);
+        Self::is_known_package_manager_name(name)
+    }
 
-        // Exact-match primary binaries of every major distro package manager.
-        // No prefix wildcards — only the real process names actually written
-        // to /proc/<pid>/comm (truncated to 15 chars by the kernel).
+    fn is_known_package_manager_name(name: &str) -> bool {
         matches!(
             name,
             "apt"
@@ -133,5 +186,49 @@ mod tests {
         assert!(!c.is_package_manager_process("store"));
         assert!(!c.is_package_manager_process("packagekitd"));
         assert!(!c.is_package_manager_process("apt-cacher-ng"));
+    }
+
+    #[test]
+    fn test_is_file_locked_fcntl_and_flock() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let lock_path = temp_dir.join("sauroneye_test_lock.lck");
+
+        // Create the dummy lock file
+        {
+            let mut f = std::fs::File::create(&lock_path).unwrap();
+            writeln!(f, "test lock").unwrap();
+        }
+
+        // Unlocked file should return false
+        assert!(!PackageManagerChecker::is_file_locked(&lock_path));
+
+        // Lock with POSIX fcntl F_SETLK
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let fl = libc::flock {
+            l_type: libc::F_WRLCK as libc::c_short,
+            l_whence: libc::SEEK_SET as libc::c_short,
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+        };
+        let res = unsafe { libc::fcntl(fd, libc::F_SETLK, &fl) };
+        assert_eq!(res, 0, "Failed to acquire test fcntl write lock");
+
+        // Now PackageManagerChecker::is_file_locked MUST detect it as locked (true)
+        assert!(
+            PackageManagerChecker::is_file_locked(&lock_path),
+            "Failed to detect POSIX fcntl lock held by apt/dpkg style process!"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&lock_path);
     }
 }

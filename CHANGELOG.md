@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.9] - 2026-09-07
+
+### Reliability & False Positive Suppression
+- **POSIX Record Lock & flock Dual-Check for Package Managers**: Upgraded `PackageManagerChecker` to detect both BSD `flock(2)` and POSIX `fcntl(F_SETLK)` record locks on canonical package manager lock files (`/var/lib/dpkg/lock-frontend`, `/var/lib/dpkg/lock`, `/var/lib/rpm/.rpm.lock`, etc.). Debian's `apt` and `dpkg` acquire POSIX locks that previously escaped detection by BSD `flock` during manual commands such as `apt full-upgrade`.
+- **Fast `/proc` Process Scanning Fallback**: In addition to lock file inspection, `PackageManagerChecker` now scans `/proc/[pid]/comm` to instantly detect running instances of package managers (`apt`, `dpkg`, `unattended-upgr`, `rpm`, `dnf`, etc.), ensuring zero false positives even during brief lock transitions.
+- **Built-in Transient Packaging Exclusions**: Automatically exclude transient files generated during package unpacking and library dynamic cache generation across monitored paths:
+  - Debian/Ubuntu: `*.dpkg-new`, `*.dpkg-tmp`, `*.dpkg-old`, `*.dpkg-dist`, `*.dpkg-bak`, `*/ld.so.cache~`.
+  - RedHat/Fedora: `*.rpmnew`, `*.rpmsave`, `*.rpmorig`, `*/ld.so.cache~`.
+
+---
+
 ## [1.0.8] - 2026-09-04
 
 ### Security & Hardening

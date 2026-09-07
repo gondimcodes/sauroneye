@@ -51,7 +51,13 @@ debian = [
     "/var/lib/dpkg/tmp.ci",
     "/var/lib/dpkg/lock-frontend",
     "/var/lib/dpkg/lock",
-    "/var/lib/apt/lists/lock"
+    "/var/lib/apt/lists/lock",
+    "*.dpkg-new",
+    "*.dpkg-tmp",
+    "*.dpkg-old",
+    "*.dpkg-dist",
+    "*.dpkg-bak",
+    "ld.so.cache~"
 ]
 
 # RedHat / Rocky Linux / AlmaLinux / Fedora transient files
@@ -59,7 +65,11 @@ redhat = [
     "/var/cache/dnf",
     "/var/cache/yum",
     "/var/lib/dnf/history",
-    "/var/lib/rpm/.rpm.lock"
+    "/var/lib/rpm/.rpm.lock",
+    "*.rpmnew",
+    "*.rpmsave",
+    "*.rpmorig",
+    "ld.so.cache~"
 ]
 
 # Alpine Linux transient files

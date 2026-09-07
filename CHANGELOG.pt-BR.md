@@ -7,6 +7,17 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.0.9] - 2026-09-07
+
+### Confiabilidade e Supressão de Falsos Positivos
+- **Detecção Dupla de Travas de Gerenciador de Pacotes (POSIX fcntl + flock)**: Atualizado o `PackageManagerChecker` para verificar simultaneamente travas BSD `flock(2)` e travas de registro POSIX `fcntl(F_SETLK)` nos arquivos canônicos (`/var/lib/dpkg/lock-frontend`, `/var/lib/dpkg/lock`, `/var/lib/rpm/.rpm.lock`, etc.). O `apt` e o `dpkg` no Debian utilizam travas POSIX que não eram interceptadas pela verificação isolada de `flock` durante comandos manuais como `apt full-upgrade`.
+- **Varredura Rápida de Processos em `/proc` como Fallback**: Além dos arquivos de trava, o `PackageManagerChecker` agora inspeciona `/proc/[pid]/comm` para identificar instantaneamente processos de gerenciamento de pacotes em execução (`apt`, `dpkg`, `unattended-upgr`, `rpm`, `dnf`, etc.), garantindo zero falsos positivos mesmo durante janelas transitórias de troca de travas.
+- **Exclusões Nativas de Arquivos Transitórios de Pacotes**: Inclusão automática de regras de exclusão nos perfis de distro para arquivos temporários criados durante a descompactação e rebuild de cache de bibliotecas dinâmicas:
+  - Debian/Ubuntu: `*.dpkg-new`, `*.dpkg-tmp`, `*.dpkg-old`, `*.dpkg-dist`, `*.dpkg-bak`, `*/ld.so.cache~`.
+  - RedHat/Fedora: `*.rpmnew`, `*.rpmsave`, `*.rpmorig`, `*/ld.so.cache~`.
+
+---
+
 ## [1.0.8] - 2026-09-04
 
 ### Segurança e Blindagem

@@ -1,6 +1,6 @@
 [package]
 name = "sauroneye"
-version = "1.0.8"
+version = "1.0.9"
 
 
 
@@ -35,6 +35,7 @@ rpassword = "7.3"
 
 # System, Linux FS & Kernel Netlink
 nix = { version = "0.29", features = ["fs", "user", "signal", "process", "hostname"] }
+libc = "0.2"
 
 
 # HTTP Client (Alerting: Telegram & WhatsApp)

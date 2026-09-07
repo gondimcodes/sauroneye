@@ -206,8 +206,10 @@ mod tests {
 
     #[test]
     fn test_allowed_cmd_patterns_whitelist() {
-        let mut config = RceDetectorConfig::default();
-        config.allowed_cmd_patterns = vec!["kong.cmd.init".to_string(), "resty".to_string()];
+        let config = RceDetectorConfig {
+            allowed_cmd_patterns: vec!["kong.cmd.init".to_string(), "resty".to_string()],
+            ..Default::default()
+        };
         let detector = RceDetector::new(config);
 
         let kong_cmd = "sh -c -- resty --main-conf '' -e 'require(\"kong.cmd.init\")(\"health\")'";

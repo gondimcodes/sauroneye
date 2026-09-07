@@ -94,6 +94,16 @@ impl FimEngine {
             || (is_auto && Path::new("/etc/debian_version").exists())
         {
             exclusions.extend(distro_cfg.debian.clone());
+            // Built-in transient packaging patterns for dpkg/apt and ldconfig
+            exclusions.extend(vec![
+                "*.dpkg-new".to_string(),
+                "*.dpkg-tmp".to_string(),
+                "*.dpkg-old".to_string(),
+                "*.dpkg-dist".to_string(),
+                "*.dpkg-bak".to_string(),
+                "*/ld.so.cache~".to_string(),
+                "ld.so.cache~".to_string(),
+            ]);
         }
 
         // Detect or apply RedHat/Rocky/Alma/CentOS/Fedora exclusions
@@ -103,6 +113,14 @@ impl FimEngine {
             || (is_auto && Path::new("/etc/redhat-release").exists())
         {
             exclusions.extend(distro_cfg.redhat.clone());
+            // Built-in transient packaging patterns for rpm/dnf
+            exclusions.extend(vec![
+                "*.rpmnew".to_string(),
+                "*.rpmsave".to_string(),
+                "*.rpmorig".to_string(),
+                "*/ld.so.cache~".to_string(),
+                "ld.so.cache~".to_string(),
+            ]);
         }
 
         // Detect or apply Alpine exclusions
@@ -570,5 +588,54 @@ impl FimEngine {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_excluded_transient_packaging_patterns() {
+        let patterns = vec![
+            "*.dpkg-new".to_string(),
+            "*.dpkg-tmp".to_string(),
+            "*.dpkg-old".to_string(),
+            "*.rpmnew".to_string(),
+            "ld.so.cache~".to_string(),
+            "/var/lib/apt/lists/partial".to_string(),
+        ];
+
+        // Should match transient dpkg files
+        assert!(FimEngine::check_excluded(
+            Path::new("/usr/lib/x86_64-linux-gnu/libde265.so.0.1.8.dpkg-new"),
+            &patterns
+        ));
+        assert!(FimEngine::check_excluded(
+            Path::new("/usr/lib/x86_64-linux-gnu/libde265.so.0.dpkg-tmp"),
+            &patterns
+        ));
+        assert!(FimEngine::check_excluded(
+            Path::new("/etc/ld.so.cache~"),
+            &patterns
+        ));
+        assert!(FimEngine::check_excluded(
+            Path::new("/etc/nginx/nginx.conf.rpmnew"),
+            &patterns
+        ));
+
+        // Normal legitimate files should NOT be excluded
+        assert!(!FimEngine::check_excluded(
+            Path::new("/usr/lib/x86_64-linux-gnu/libde265.so.0.1.8"),
+            &patterns
+        ));
+        assert!(!FimEngine::check_excluded(
+            Path::new("/etc/ld.so.cache"),
+            &patterns
+        ));
+        assert!(!FimEngine::check_excluded(
+            Path::new("/etc/shadow"),
+            &patterns
+        ));
     }
 }
