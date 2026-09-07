@@ -503,6 +503,10 @@ impl FimEngine {
             }
             EventKind::Modify(_) | EventKind::Any => {
                 for path in event.paths {
+                    // Evita loops infinitos de recálculo de hash ao salvar logs no próprio banco de dados SQLite
+                    if path.to_string_lossy().contains("/sauron.db") {
+                        continue;
+                    }
                     if !Self::check_excluded(&path, active_exclusions) && path.is_file() {
                         if let Ok(fp) = FileFingerprint::generate(&path, hash_algo) {
                             let fim_ev = FimEvent::Modified {
@@ -534,11 +538,12 @@ impl FimEngine {
     fn check_excluded(path: &Path, exclude_patterns: &[String]) -> bool {
         let path_str = path.to_string_lossy();
 
-        // 1. Always ignore SQLite internal files and generated reports to avoid self-trigger feedback loops
+        // 1. Arquivos auxiliares e efêmeros de transação do SQLite e relatórios gerados
+        // ATENÇÃO: sauron.db NUNCA é excluído aqui! Ele só é excluído para escrita de dados
+        // (ModifyKind::Data) para evitar loops de I/O, mas NUNCA para chmod, chown, rm ou mv.
         if path_str.ends_with("-wal")
             || path_str.ends_with("-shm")
             || path_str.ends_with("-journal")
-            || path_str.contains("/sauron.db")
             || path_str.contains("sauroneye_report")
         {
             return true;
@@ -635,6 +640,16 @@ mod tests {
         ));
         assert!(!FimEngine::check_excluded(
             Path::new("/etc/shadow"),
+            &patterns
+        ));
+
+        // Primeira Diretriz de Segurança: sauron.db e diretórios internos NUNCA devem ser excluídos
+        assert!(!FimEngine::check_excluded(
+            Path::new("/var/lib/sauroneye/sauron.db"),
+            &patterns
+        ));
+        assert!(!FimEngine::check_excluded(
+            Path::new("/var/lib/sauroneye"),
             &patterns
         ));
     }

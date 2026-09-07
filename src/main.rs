@@ -624,6 +624,14 @@ async fn handle_run(
             if root.is_dir() {
                 state.known_directories.insert(root.clone());
             }
+            if let Ok(meta) = std::fs::metadata(root) {
+                state
+                    .known_permissions
+                    .insert(root.clone(), meta.mode() & 0o777);
+                state
+                    .known_ownership
+                    .insert(root.clone(), (meta.uid(), meta.gid()));
+            }
             for entry in walkdir::WalkDir::new(root)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -641,6 +649,26 @@ async fn handle_run(
             }
         }
     }
+
+    // Helper imutável da Primeira Diretriz de Segurança:
+    // Identifica se um arquivo/diretório é um recurso vital do próprio SauronEye
+    let exe_path_opt = std::env::current_exe().ok();
+    let is_sauron_vital = move |target: &std::path::Path| -> bool {
+        let p_str = target.to_string_lossy();
+        if p_str.starts_with("/var/lib/sauroneye")
+            || p_str.starts_with("/etc/sauroneye")
+            || target == std::path::Path::new("/var/lib/sauroneye")
+            || target == std::path::Path::new("/etc/sauroneye")
+        {
+            return true;
+        }
+        if let Some(ref ep) = exe_path_opt {
+            if target == ep.as_path() {
+                return true;
+            }
+        }
+        false
+    };
 
     // Inicia o watcher em tempo real APÓS baseline capturado
     // PERF-04: buffer increased from 512 to 2048 to handle burst events
@@ -767,7 +795,7 @@ async fn handle_run(
                                 }
                                 let _ = db.save_fingerprints_batch(&[fingerprint]);
                             } else {
-                                if !analyzer.is_package_manager_active() {
+                                if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                     let key = format!("created:{}", path.display());
                                     let now = std::time::Instant::now();
                                     if let Some(last_time) = state.recent_alert_debounce.get(&key) {
@@ -811,7 +839,7 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::DirectoryCreated { path, permissions, uid, gid } => {
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                 let key = format!("created_dir:{}", path.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = state.recent_alert_debounce.get(&key) {
@@ -853,7 +881,7 @@ async fn handle_run(
                             state.known_permissions.remove(&path);
                             state.known_ownership.remove(&path);
 
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                 let key = format!("deleted_dir:{}", path.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = state.recent_alert_debounce.get(&key) {
@@ -883,7 +911,7 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::DirectoryRenamed { from, to } => {
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&from) || is_sauron_vital(&to) {
                                 let key = format!("renamed_dir:{}:{}", from.display(), to.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = state.recent_alert_debounce.get(&key) {
@@ -914,7 +942,7 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::FileRenamed { from, to } => {
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&from) || is_sauron_vital(&to) {
                                 let key = format!("renamed_file:{}:{}", from.display(), to.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = state.recent_alert_debounce.get(&key) {
@@ -954,7 +982,7 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::PermissionsChanged { path, permissions, is_dir } => {
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                 let norm_perm = permissions & 0o777;
 
                                 // Baseline foi pré-carregado antes do watcher:
@@ -1003,7 +1031,7 @@ async fn handle_run(
                             }
                         }
                         crate::fim::engine::FimEvent::OwnershipChanged { path, uid, gid, user_name, group_name, is_dir } => {
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                 // None = arquivo novo = alerta já vem via FimEvent::Created
                                 // Some((old_uid, old_gid)) == (uid, gid) = duplicata = descarta
                                 // Some((old_uid, old_gid)) != (uid, gid) = mudança REAL = alerta
@@ -1059,7 +1087,7 @@ async fn handle_run(
                             state.known_permissions.remove(&path);
                             state.known_ownership.remove(&path);
 
-                            if !analyzer.is_package_manager_active() {
+                            if !analyzer.is_package_manager_active() || is_sauron_vital(&path) {
                                 let key = format!("deleted:{}", path.display());
                                 let now = std::time::Instant::now();
                                 if let Some(last_time) = state.recent_alert_debounce.get(&key) {
