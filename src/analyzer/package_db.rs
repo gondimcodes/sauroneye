@@ -63,12 +63,13 @@ impl PackageManagerChecker {
         use nix::fcntl::{Flock, FlockArg};
         use std::os::unix::fs::MetadataExt;
 
-        // 1. Primary check: check /proc/locks for active lock on this path's inode.
+        // 1. Primary check: check /proc/locks for active lock on this specific (device, inode).
         // This detects POSIX F_SETLK/F_SETLKW locks held by apt, dpkg, or any child process
         // without touching or closing file descriptors.
         if let Ok(meta) = std::fs::metadata(path) {
+            let target_dev = meta.dev();
             let target_ino = meta.ino();
-            if Self::is_inode_locked_in_proc_locks(target_ino) {
+            if Self::is_device_inode_locked_in_proc_locks(target_dev, target_ino) {
                 return true;
             }
         }
@@ -89,18 +90,35 @@ impl PackageManagerChecker {
         }
     }
 
-    /// Checks if a file inode appears in `/proc/locks` under POSIX/FLOCK holding an exclusive lock.
-    fn is_inode_locked_in_proc_locks(target_ino: u64) -> bool {
+    /// Checks if a file (device, inode) appears in `/proc/locks` under POSIX/FLOCK holding an exclusive lock.
+    /// In Linux `/proc/locks`, field 5 is `major_hex:minor_hex:inode_dec`.
+    /// Device numbers must be decomposed according to standard Linux sys/sysmacros.h:
+    /// major = ((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff)
+    /// minor = (dev & 0xff) | ((dev >> 12) & !0xff)
+    fn is_device_inode_locked_in_proc_locks(target_dev: u64, target_ino: u64) -> bool {
         if let Ok(locks_data) = std::fs::read_to_string("/proc/locks") {
+            let target_major = (((target_dev >> 8) & 0xfff) | ((target_dev >> 32) & !0xfff)) as u32;
+            let target_minor = ((target_dev & 0xff) | ((target_dev >> 12) & !0xff)) as u32;
             let ino_str = target_ino.to_string();
+
             for line in locks_data.lines() {
                 // Line format: 1: POSIX  ADVISORY  WRITE 12345 08:01:1234567 0 EOF
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 6 {
                     let dev_ino = parts[5];
-                    if let Some(ino) = dev_ino.split(':').nth(2) {
+                    let mut split = dev_ino.split(':');
+                    if let (Some(maj_hex), Some(min_hex), Some(ino)) =
+                        (split.next(), split.next(), split.next())
+                    {
                         if ino == ino_str {
-                            return true;
+                            if let (Ok(maj), Ok(min)) = (
+                                u32::from_str_radix(maj_hex, 16),
+                                u32::from_str_radix(min_hex, 16),
+                            ) {
+                                if maj == target_major && min == target_minor {
+                                    return true;
+                                }
+                            }
                         }
                     }
                 }
@@ -111,6 +129,7 @@ impl PackageManagerChecker {
 
     /// Scans `/proc` to verify if any canonical package manager is actively running.
     /// Fast directory scan reading only `/proc/[pid]/comm` without reading heavy environ.
+    /// Excludes persistent background daemon names like unattended-upgr or packagekitd.
     fn is_any_package_manager_running() -> bool {
         if let Ok(entries) = std::fs::read_dir("/proc") {
             for entry in entries.filter_map(|e| e.ok()) {
@@ -121,7 +140,7 @@ impl PackageManagerChecker {
                     let comm_path = entry.path().join("comm");
                     if let Ok(comm) = std::fs::read_to_string(comm_path) {
                         let proc_name = comm.trim();
-                        if Self::is_known_package_manager_name(proc_name) {
+                        if Self::is_active_installer_binary(proc_name) {
                             return true;
                         }
                     }
@@ -131,13 +150,10 @@ impl PackageManagerChecker {
         false
     }
 
-    /// Primary exact match for known package manager processes.
-    pub fn is_package_manager_process(&self, proc_name: &str) -> bool {
-        let name = proc_name.rsplit('/').next().unwrap_or(proc_name);
-        Self::is_known_package_manager_name(name)
-    }
-
-    fn is_known_package_manager_name(name: &str) -> bool {
+    /// Identifies active foreground or worker package manager installer binaries.
+    /// Note: Does NOT include passive background service daemons (e.g. unattended-upgr)
+    /// which can stay permanently idle in RAM waiting for timers.
+    fn is_active_installer_binary(name: &str) -> bool {
         matches!(
             name,
             "apt"
@@ -149,7 +165,6 @@ impl PackageManagerChecker {
                 | "dpkg-split"
                 | "dpkg-query"
                 | "aptitude"
-                | "unattended-upgr" // "unattended-upgrade" truncated to 15
                 | "debconf"
                 | "needrestart"
                 | "yum"
@@ -160,6 +175,12 @@ impl PackageManagerChecker {
                 | "apk"
                 | "zypper"
         )
+    }
+
+    /// Primary exact match for known package manager processes.
+    pub fn is_package_manager_process(&self, proc_name: &str) -> bool {
+        let name = proc_name.rsplit('/').next().unwrap_or(proc_name);
+        Self::is_active_installer_binary(name) || name == "unattended-upgr"
     }
 }
 
